@@ -42,5 +42,5 @@ CPU halts
 <a href="https://wiki.osdev.org/Expanded_Main_Page" target="_blank">Main Wiki OSDev</a><br/>
 <a href="https://github.com/torvalds/linux/blob/master/arch/x86/boot/compressed/head_64.S" target="_blank">Linux Bootloader ASM</a><br/>
 <a href="https://github.com/torvalds/linux/blob/master/arch/x86/kernel/head64.c" target="_blank">Linux Start.c</a><br/>
-<a href="[https://wiki.osdev.org/Expanded_Main_Page](https://github.com/torvalds/linux/blob/master/init/main.c)" target="_blank">Linux kernel.c/a>
+<a href="[https://wiki.osdev.org/Expanded_Main_Page](https://github.com/torvalds/linux/blob/master/init/main.c)" target="_blank">Linux kernel.c</a>
 
