@@ -36,5 +36,7 @@ kernel_main() in C
 CPU halts
 ```
 
-### References
+## References
 <a href="https://wiki.osdev.org/Setting_Up_Long_Mode#Entering_Long_Mode" target="_blank">Entering Long Mode (64-bit)</a>
+<a href="https://github.com/TheOSDevLab/Crafting-an-OS-Notes-and-Insights/blob/main/roadmap/03_bootloader_development.md#chs-second-stage-project" target="_blank">Basics of Bootloading</a>
+<a href="https://wiki.osdev.org/Expanded_Main_Page" target="_blank">Main Wiki OSDev</a>
