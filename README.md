@@ -12,6 +12,11 @@ To rebuild everything from scratch:
 make clean && make && make run
 ```
 
+Install Qemu on system:
+```sh
+sudo apt install qemu-system
+```
+
 ## Boot sequence
 
 ```text
