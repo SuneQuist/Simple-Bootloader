@@ -35,3 +35,6 @@ kernel_main() in C
     v
 CPU halts
 ```
+
+### References
+<a href="https://wiki.osdev.org/Setting_Up_Long_Mode#Entering_Long_Mode" target="_blank">Entering Long Mode (64-bit)</a>
