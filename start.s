@@ -52,54 +52,56 @@ protected_mode:
     mov dword ptr [0x2000], 0x3003 /* PDPT[0] -> PD */        # PDPT[0] points to the PD at 0x3000.
     mov dword ptr [0x3000], 0x0083 /* PD[0] -> 2 MiB page */  # PD[0] maps one 2 MiB page at physical 0.
 
+    # Turn on paging and jump into 64-bit code
     /* Enable PAE and point CR3 at PML4. */
-    mov eax, cr4
-    or eax, 0x20
-    mov cr4, eax
-    mov eax, 0x1000
-    mov cr3, eax
+    mov eax, cr4           # Read CPU control register CR4.
+    or eax, 0x20           # Set bit 5, PAE (Physical Address Extension).
+    mov cr4, eax           # Write CR4 back with PAE enabled.
+    mov eax, 0x1000        # Load the physical address of the PML4.
+    mov cr3, eax           # Tell the CPU where the root page table is.
 
     /* Enable long mode (EFER.LME). */
-    mov ecx, 0xc0000080
-    rdmsr
-    or eax, 0x100
-    wrmsr
+    mov ecx, 0xc0000080    # Select the EFER model-specific register.
+    rdmsr                  # Read it into EDX:EAX, high half and low half.
+    or eax, 0x100          # Set bit 8, LME (Long Mode Enable).
+    wrmsr                  # Write EDX:EAX back to EFER.
 
     /* Enable paging; then far-jump into a 64-bit code segment. */
-    mov eax, cr0
-    or eax, 0x80000000
-    mov cr0, eax
-    ljmp 0x18, long_mode
+    mov eax, cr0           # Read CR0 again, preserving the PE bit.
+    or eax, 0x80000000     # Set bit 31, PG (Paging).
+    mov cr0, eax           # Enable paging and activate long mode.
+    ljmp 0x18, long_mode   # Load the 64-bit code selector and jump.
 
-.code64
-long_mode:
-    mov ax, 0x10
-    mov ds, ax
-    mov es, ax
-    mov ss, ax
-    mov fs, ax
-    mov gs, ax
-    mov rsp, 0x90000
-    and rsp, -16
-    call kernel_main
+# Call C and halt if it returns
+.code64                    # Encode the next instructions for 64-bit mode.
+long_mode:                 # Target of the second far jump.
+    mov ax, 0x10           # Select the same data descriptor as before.
+    mov ds, ax             # Reload the data segment register.
+    mov es, ax             # Reload the extra segment register.
+    mov ss, ax             # Reload the stack segment register.
+    mov fs, ax             # Reload the FS selector.
+    mov gs, ax             # Reload the GS selector.
+    mov rsp, 0x90000       # Set the full 64-bit stack pointer.
+    and rsp, -16           # Clear the bottom four bits to align it to 16 bytes.
+    call kernel_main       # Push the return address and enter the C function.
 
-hang:
-    cli
-    hlt
-    jmp hang
+hang:                      # Execution comes here only if kernel_main returns.
+    cli                    # Ensure maskable interrupts are disabled.
+    hlt                    # Halt the CPU.
+    jmp hang               # If execution resumes, go back and halt again.
 
 /* GDT: null, 32-bit code, data, 64-bit code. */
-.align 8
-gdt:
-    .quad 0
-    .quad 0x00cf9a000000ffff
-    .quad 0x00cf92000000ffff
-    .quad 0x00af9a000000ffff
-gdt_end:
+.align 8                   # Pad so the GDT starts on an 8-byte boundary.
+gdt:                       # Address of the first GDT entry.
+    .quad 0                # Entry 0, selector 0x00: null descriptor.
+    .quad 0x00cf9a000000ffff  # Entry 1, selector 0x08: 32-bit kernel code.
+    .quad 0x00cf92000000ffff  # Entry 2, selector 0x10: writable kernel data.
+    .quad 0x00af9a000000ffff  # Entry 3, selector 0x18: 64-bit kernel code.
+gdt_end:                   # Address immediately after the last entry.
 
-gdt_descriptor:
-    .word gdt_end - gdt - 1
-    .long gdt
+gdt_descriptor:            # The record that LGDT reads.
+    .word gdt_end - gdt - 1  # 16-bit limit: table size minus one, or 31.
+    .long gdt              # 32-bit field holding the table's base address.
 
-.section .note.GNU-stack,"",@progbits
+.section .note.GNU-stack,"",@progbits  # Tell the linker this object doesn't request an executable stack.
 
