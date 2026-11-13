@@ -39,4 +39,8 @@ CPU halts
 ## References
 <a href="https://wiki.osdev.org/Setting_Up_Long_Mode#Entering_Long_Mode" target="_blank">Entering Long Mode (64-bit)</a><br/>
 <a href="https://github.com/TheOSDevLab/Crafting-an-OS-Notes-and-Insights/blob/main/roadmap/03_bootloader_development.md#chs-second-stage-project" target="_blank">Basics of Bootloading</a><br/>
-<a href="https://wiki.osdev.org/Expanded_Main_Page" target="_blank">Main Wiki OSDev</a>
+<a href="https://wiki.osdev.org/Expanded_Main_Page" target="_blank">Main Wiki OSDev</a><br/>
+<a href="https://github.com/torvalds/linux/blob/master/arch/x86/boot/compressed/head_64.S" target="_blank">Linux Bootloader ASM</a><br/>
+<a href="https://github.com/torvalds/linux/blob/master/arch/x86/kernel/head64.c" target="_blank">Linux Start.c</a><br/>
+<a href="[https://wiki.osdev.org/Expanded_Main_Page](https://github.com/torvalds/linux/blob/master/init/main.c)" target="_blank">Linux kernel.c/a>
+
