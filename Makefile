@@ -1,37 +1,40 @@
-# Linux host GNU binutils/GCC, QEMU. No NASM and no cross-compiler required.
 AS = as
 CC = gcc
 LD = ld
 OBJCOPY = objcopy
+QEMU = qemu-system-x86_64
 
 CFLAGS = -m64 -std=c11 -Os -ffreestanding -fno-builtin \
          -fno-stack-protector -fno-stack-check -fno-pie -fno-pic \
          -fno-asynchronous-unwind-tables -fno-unwind-tables \
-         -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
-         -Wall -Wextra
+         -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra
+C_OBJECTS = kernel.o filesystem/fs.o shell/shell.o \
+            console/console.o keyboard/keyboard.o \
+            keyboard/mouse.o
+CPPFLAGS += -Ifilesystem -Ishell -Iconsole -Ikeyboard -Imouse
 
-.PHONY: all run clean
+.PHONY: all run test clean
 all: kernel.img
 
-boot.o: boot.s
+%.o: %.c
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+%.o: %.s
 	$(AS) --64 $< -o $@
 
 boot.bin: boot.o
 	$(LD) -m elf_x86_64 --oformat binary -Ttext 0x7c00 $< -o $@
-	@test "$$(wc -c < $@)" -eq 512 || (echo 'ERROR: boot sector must be exactly 512 bytes' && exit 1)
+	test "$$(wc -c < $@)" -eq 512
 
-start.o: start.s
-	$(AS) --64 $< -o $@
-
-kernel.o: kernel.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-stage2.elf: start.o kernel.o linker.ld
-	$(LD) -m elf_x86_64 -T linker.ld start.o kernel.o -o $@
+stage2.elf: start.o $(C_OBJECTS) linker.ld
+	$(LD) -m elf_x86_64 -T linker.ld start.o $(C_OBJECTS) -o $@
 
 stage2.bin: stage2.elf
 	$(OBJCOPY) -O binary $< $@
-	@test "$$(wc -c < $@)" -le 8192 || (echo 'ERROR: stage2 exceeds 16 sectors (8192 bytes)' && exit 1)
+	@if [ "$$(wc -c < $@)" -gt 8192 ]; then \
+		echo 'stage2 exceeds the bootloader limit of 8192 bytes'; \
+		rm -f $@; exit 1; \
+	fi
 
 kernel.img: boot.bin stage2.bin
 	dd if=/dev/zero of=$@ bs=512 count=2880 status=none
@@ -39,8 +42,17 @@ kernel.img: boot.bin stage2.bin
 	dd if=stage2.bin of=$@ bs=512 seek=1 conv=notrunc status=none
 
 run: kernel.img
-	qemu-system-x86_64 -drive file=kernel.img,format=raw,if=floppy -boot a
+	$(QEMU) -drive file=kernel.img,format=raw,if=floppy -boot a
+
+test: tests/test_shell.c filesystem/fs.c shell/shell.c
+	$(CC) $(CPPFLAGS) -std=c11 -Wall -Wextra -Werror tests/test_shell.c filesystem/fs.c shell/shell.c -o test_shell
+	./test_shell
+
+%.o: %.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
 clean:
-	rm -f boot.o boot.bin start.o kernel.o stage2.elf stage2.bin kernel.img
+	rm -f *.o *.d boot.bin stage2.elf stage2.bin kernel.img test_shell
+
+-include $(C_OBJECTS:.o=.d)
 
