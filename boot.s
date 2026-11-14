@@ -17,47 +17,83 @@ _start:
 	mov sp, 0x7c00 # stack-pointer to boot loader address [0x7c00 - 0x7DFF]
 	
 	sti # Start Interrupt Flag
+    
+    /*  # Deprecated for 32KB
+        # Bootloader takes over here, ID from where you booted from
+        # is stored in dl, 
+        # byte ptr [boot_drive] means to load dl into the adress of boot_drive
+        # byte ptr is simply the size of boot_drive to load
+        mov byte ptr [boot_drive], dl # bits 0-7 from rdx (low)
 
-	/* Bootloader takes over here, ID from where you booted from
-	*  is stored in dl, 
-	*  byte ptr [boot_drive] means to load dl into the adress of boot_drive
-	*  byte ptr is simply the size of boot_drive to load
-	*/
+        # Offset in RAM where BIOS will place the data read from disk
+        mov bx, 0x8000	# ES:BX = 0000:8000
 
-	mov byte ptr [boot_drive], dl # bits 0-7 from rdx (low)
-	# Offset in RAM where BIOS will place the data read from disk
-	mov bx, 0x8000	# ES:BX = 0000:8000
-	# Tells the BIOS interrupt which function you want to run
-	mov ah, 0x02	# Read Sectors from drive
-	# How many sectors to read. A sector is 512 bytes each, so 16 is 8,192 (8 KB) 
-	mov al, 16	# 16 sectors
-	/* Selects cylinder 0 on disk
-	*  The name cylinder comes from the traces on a disk
-	*/
-	mov ch, 0	# cylinder 0 (CH)
-	# Our current bootloader (this script) is Sector 1 so we jump to sector 2 next
-	mov cl, 2	# sector 2 (sectors start at 1)
-	/* Select head 0 (the first read/write of the drive)
-	*  The word head comes from again a HDD where the arm reading and writing
-	*  is referred to as the head.
-	*/
-	mov dh, 0	# head 0
-	
-	# Load the saved drive number back into dl
-	mov dl, byte ptr [boot_drive]
-	/* Triggers BIOS interrupt, and aks the BIOS to execute the disk and read
-	*  using the parameters you just set.
-	*/
-	int 0x13
-	/* Jump if Carry (jc) means if the BIOS fails to read the disk,
-	*  it sets the CPU's Carry Flag (CF) t0 1.
-	*  In general computing CF 0 means success and 1 means error.
-	*/
-	jc disk_error
+        # Tells the BIOS interrupt which function you want to run
+        mov ah, 0x02	# Read Sectors from drive
 
-	/* long jump, sets the code segment to 0x000, and the instruciton pointer
-	*  to 0x8000
-	*/
+        # How many sectors to read. A sector is 512 bytes each, so 16 is 8,192 (8 KB) 
+        mov al, 16	# 16 sectors
+
+        #Selects cylinder 0 on disk
+        #The name cylinder comes from the traces on a disk
+        mov ch, 0	# cylinder 0 (CH)
+       
+         # Our current bootloader (this script) is Sector 1 so we jump to sector 2 next
+        mov cl, 2	# sector 2 (sectors start at 1)
+
+        # Select head 0 (the first read/write of the drive)
+        # The word head comes from again a HDD where the arm reading and writing
+        # is referred to as the head.
+        mov dh, 0	# head 0
+        
+        # Load the saved drive number back into dl
+        mov dl, byte ptr [boot_drive]
+        
+        # Triggers BIOS interrupt, and aks the BIOS to execute the disk and read
+        # using the parameters you just set.
+        int 0x13
+    
+        # Jump if Carry (jc) means if the BIOS fails to read the disk,
+        # it sets the CPU's Carry Flag (CF) t0 1.
+        # In general computing CF 0 means success and 1 means error.
+        jc disk_error
+    */
+
+    mov bx, 0x8000  # Destination in RAM: ES:BX = 0000:8000
+    mov cx, 2       # CH = cylinder 0, CL = sector 2
+    xor dh, dh      # Head 0. Leave DL holding the BIOS boot drive.
+
+read_sector:
+    push ds
+    push es
+    push bx
+    push cx
+    push dx
+    mov ax, 0x0201          /* AH = read sectors, AL = one sector */
+    int 0x13
+    pop dx
+    pop cx
+    pop bx
+    pop es
+    pop ds
+    jc disk_error
+
+    add bx, 512
+    jz loaded               /* BX wraps to 0 after 64 sectors (32 KiB). */
+
+    inc cl
+    cmp cl, 19              /* A 1.44 MB floppy has 18 sectors per track. */
+    jb read_sector
+    mov cl, 1
+    xor dh, 1               /* Head 0 -> 1, or head 1 -> 0. */
+    jnz read_sector
+    inc ch                  /* Both heads done, advance the cylinder. */
+    jmp read_sector
+
+/* long jump, sets the code segment to 0x000, and the instruciton pointer
+*  to 0x8000
+*/
+loaded:
 	ljmp 0x0000, 0x8000
 
 disk_error:
@@ -66,9 +102,10 @@ disk_error:
 1:
 	hlt
 	jmp 1b # Jump 1 backward, so infinite loop back to halt
-
+/* Deprecated for a 32KB
 boot_drive:
 	.byte 0 # 1 byte of stoage, also where dl is stored!
+*/
 
 /* An assembler directive (origin) that pads the file with zeroes
 *  up to byte offset 510

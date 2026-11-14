@@ -1,22 +1,35 @@
 #include "console/console.h"
 #include "filesystem/fs.h"
-#include "keyboard/keyboard.h"
+#include "peripherals/keyboard.h"
 #include "shell/shell.h"
+#include "shell/login.h"
+#include "account/account.h"
 
 void kernel_main(void) {
     static const char notes[] = "Hello from notes.txt!\nThis file lives in RAM.\n";
     static const char script[] = "echo \"Running demo.sh\"\nls\ncat notes.txt";
 
     console_clear();
+    
+    account_init();
+
+    unsigned uid = create_account("guest", "test-only");
+    if (uid == ACCOUNT_NONE) {
+        console_print("Account creation failed\n");
+    } else {
+        login("guest", "test-only");
+        console_print(account_uid() == uid ? "Login OK\n" : "Login failed\n");
+        account_logout();
+    }
+        
     keyboard_init();
     fs_init();
-    fs_put("notes.txt", 1, notes, sizeof(notes) - 1);
-    fs_put("demo.sh", 1, script, sizeof(script) - 1);
-    fs_put("fold", 2, "", 0);
-    fs_goto("/fold");
-    fs_put("test.txt", 1, notes, sizeof(notes) - 1);
-    console_print("Tiny64 shell. Type help for commands.\n");
-    console_print(keyboard_enable_mouse() ? "PS/2 mouse ready\n": "Ps/2 mouse did not acknowledge\n");
+    login_prompt();
+
+    //fs_put("fold", 2, "", 0);
+    //fs_goto("/fold");
+    //fs_put("test.txt", 1, notes, sizeof(notes) - 1);
+    keyboard_enable_mouse();
     shell_run();
 }
 

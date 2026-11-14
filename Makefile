@@ -7,10 +7,13 @@ QEMU = qemu-system-x86_64
 CFLAGS = -m64 -std=c11 -Os -ffreestanding -fno-builtin \
          -fno-stack-protector -fno-stack-check -fno-pie -fno-pic \
          -fno-asynchronous-unwind-tables -fno-unwind-tables \
-         -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra
+         -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra \
+         -U_FORTIFY_SOURCE
 C_OBJECTS = kernel.o filesystem/fs.o shell/shell.o \
-            console/console.o keyboard/keyboard.o \
-            keyboard/mouse.o
+            console/console.o peripherals/keyboard.o \
+            peripherals/mouse.o console/tty.o shell/login.o \
+            peripherals/vmmouse.o
+include account/account.mk
 CPPFLAGS += -Ifilesystem -Ishell -Iconsole -Ikeyboard -Imouse
 
 .PHONY: all run test clean
@@ -31,8 +34,8 @@ stage2.elf: start.o $(C_OBJECTS) linker.ld
 
 stage2.bin: stage2.elf
 	$(OBJCOPY) -O binary $< $@
-	@if [ "$$(wc -c < $@)" -gt 8192 ]; then \
-		echo 'stage2 exceeds the bootloader limit of 8192 bytes'; \
+	@if [ "$$(wc -c < $@)" -gt 32768 ]; then \
+		echo 'stage2 exceeds the bootloader limit of 32768 bytes'; \
 		rm -f $@; exit 1; \
 	fi
 

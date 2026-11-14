@@ -43,6 +43,8 @@ void console_putc(char c) {
             cell(i, ' ');
         pos = CELLS - WIDTH;
     }
+
+    console_set_cursor(pos);
 }
 
 void console_line_end(void) {
@@ -58,6 +60,19 @@ void console_write(const char *text, unsigned len) {
 void console_print(const char *text) {
     while (*text)
         console_putc(*text++);
+}
+
+void console_print_uint(unsigned n) {
+    char digits[10];  // A 32-bit unsigned int has at most 10 decimal digits.
+    unsigned count = 0;
+
+    do {
+        digits[count++] = '0' + n % 10;
+        n /= 10;
+    } while (n != 0);
+
+    while (count > 0)
+        console_putc(digits[--count]);
 }
 
 void console_seek(unsigned cell) {

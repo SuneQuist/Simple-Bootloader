@@ -1,7 +1,7 @@
 #include "shell.h"
 #include "../console/console.h"
 #include "../filesystem/fs.h"
-#include "../keyboard/keyboard.h"
+#include "../peripherals/keyboard.h"
 
 enum { LINE_CAP = 128, MAX_ARGS = 8, MAX_SCRIPT_DEPTH = 4 };
 
@@ -23,10 +23,11 @@ static int error(const char *msg) {
     return 1;
 }
 
-static void list_files(void) {
+static void listdir(const char *name) {
     for (unsigned slot = 0;; ++slot) {
+        unsigned dir_ino = fs_absolute(name);
         unsigned ino;
-        const char *name = fs_entry(slot, &ino);
+        const char *name = fs_entry(dir_ino, slot, &ino);
         if (!name)
             break;
         /* Inode numbers fit in two digits in this filesystem. */
@@ -46,13 +47,16 @@ static void list_files(void) {
     }
 }
 
-static int execute(const char *line, unsigned depth);
+static int execute(const char *line, unsigned depth, unsigned script_argc, const char *const *script_argv);
 
-static int run_script(const char *name, unsigned depth) {
+static int run_script(const char *path, unsigned depth, 
+                        unsigned script_argc, const char *const *script_argv, 
+                        int require_exec) {
     unsigned len;
-    const char *text = fs_read(name, &len);
+    const char *text = require_exec ? fs_read_exec(path, &len)
+                                    : fs_read(path, &len);
     if (!text)
-        return error("sh: file not found");
+        return error("sh: file not found or inaccessible");
     if (depth >= MAX_SCRIPT_DEPTH)
         return error("sh: scripts nested too deeply");
 
@@ -68,7 +72,7 @@ static int run_script(const char *name, unsigned depth) {
         if (pos < len)
             ++pos;
         line[n] = '\0';
-        if (execute(line, depth + 1))
+        if (execute(line, depth + 1, script_argc, script_argv))
             return 1;
     }
 
@@ -76,7 +80,8 @@ static int run_script(const char *name, unsigned depth) {
 }
 
 /* Split on spaces outside double quotes. Quotes are removed. */
-static int execute(const char *line, unsigned depth) {
+static int execute(const char *line, unsigned depth, 
+                    unsigned script_argc, const char *const *script_argv) {
     unsigned argc = 0, used = 0;
     const char *argv[MAX_ARGS];
     char words[LINE_CAP];
@@ -89,6 +94,30 @@ static int execute(const char *line, unsigned depth) {
     while (*line) {
         if (argc == MAX_ARGS)
             return error("shell: too many arguments");
+
+        /* Only expand these forms when they are a whole word in a script. */
+        if (script_argv && line[0] == '"' && line[1] == '$' &&
+            (line[2] == '@' || line[2] == '1') && line[3] == '"' &&
+            (line[4] == '\0' || space(line[4]))) {
+
+            if (line[2] == '@') {
+                if (script_argc > MAX_ARGS - argc)
+                    return error("shell: too many arguments");
+
+                for (unsigned i = 0; i < script_argc; ++i)
+                    argv[argc++] = script_argv[i];
+            } else {
+                if (argc == MAX_ARGS)
+                    return error("shell: too many arguments");
+
+                argv[argc++] = script_argc ? script_argv[0] : "";
+            }
+
+            line += 4;  /* Skip the four characters in "$@" or "$1". */
+            while (space(*line))
+                ++line;
+            continue;
+        }
 
         // Look for quotes and null terminate string on ending (")
         argv[argc++] = &words[used];
@@ -118,10 +147,14 @@ static int execute(const char *line, unsigned depth) {
         return 0;
     if (equal(argv[0], "help")) {
         console_print("help  ls  cat FILE  echo WORDS  sh FILE  clear\n");
-    } else if (equal(argv[0], "ls")) {
-        if (argc != 1)
-            return error("usage: ls");
-        list_files();
+    } else if (equal(argv[0], "listdir")) {
+        if (argc != 2)
+            return error("usage: listdir DIR");
+        listdir(argv[1]);
+    } else if (equal(argv[0], "cd")) {
+        if (argc != 2)
+            return error("usage: cd DIR");
+        fs_goto(argv[1]);
     } else if (equal(argv[0], "cat")) {
         if (argc != 2)
             return error("usage: cat FILE");
@@ -138,19 +171,30 @@ static int execute(const char *line, unsigned depth) {
         }
         console_putc('\n');
     } else if (equal(argv[0], "sh")) {
-        if (argc != 2)
-            return error("usage: sh FILE");
-        return run_script(argv[1], depth);
+        if (argc < 2)
+            return error("usage: sh FILE [ARG ...]");
+        return run_script(argv[1], depth, argc - 2, argv + 2, 0);
     } else if (equal(argv[0], "clear")) {
         console_clear();
     } else {
-        return error("shell: unknown command");
+        char path[sizeof "/bin/" + 29] = "/bin/";
+        unsigned end = sizeof "/bin/" - 1;
+
+        for (const char *p = argv[0]; *p; ++p) {
+            if (*p == '/' || end == sizeof path - 1)
+                return error("shell: invalid command name");
+
+            path[end++] = *p;
+        }
+
+        path[end] = '\0';
+        return run_script(path, depth, argc - 1, argv + 1, 1);
     }
     return 0;
 }
 
 int shell_execute(const char *line) {
-    return execute(line, 0);
+    return execute(line, 0, 0, 0);
 }
 
 void shell_run(void) {
