@@ -55,7 +55,7 @@ test: tests/test_shell.c filesystem/fs.c shell/shell.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
 clean:
-	rm -f *.o *.d boot.bin stage2.elf stage2.bin kernel.img test_shell
+	rm -f *.o *.d $(C_OBJECTS) $(C_OBJECTS:.o=.d)  boot.bin stage2.elf stage2.bin kernel.img test_shell
 
 -include $(C_OBJECTS:.o=.d)
 
