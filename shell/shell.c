@@ -130,7 +130,7 @@ static int execute(const char *line, unsigned depth,
     else if (equal(argv[0], "cd")) {            cd(argc, argv); }
     else if (equal(argv[0], "netinfo")) {       netinfo(); }
     else if (equal(argv[0], "netcards")) {      netcards(); }
-    else if (equal(argv[0], "ping")) {          ping(); }
+    else if (equal(argv[0], "ping")) {          ping(argv); }
     else if (equal(argv[0], "clear")) {         clear(); }
     // Other commands that aren't in an include file like basich 
     else if (equal(argv[0], "run")) {

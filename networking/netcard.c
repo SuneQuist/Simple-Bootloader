@@ -81,13 +81,15 @@ uint32_t pci_read(unsigned bus, unsigned slot, unsigned fn, unsigned offset) {
                   //            1100 1111
                   // Bit number:   3  2  1  0
                   // Place value:  8  4  2  1
-                  | ((bus & 0xFFu) << 16) // lower 8 bits 
-                  | ((slot & 0x1Fu) << 11) // lower 5 bits
-                  | ((fn & 0x07u) << 8) // lower 3 bits
+                  | ((bus & 0xFFu) << 16) // lower 8 bits - push to bit 16
+                  | ((slot & 0x1Fu) << 11) // lower 5 bits - push to bit 11
+                  | ((fn & 0x07u) << 8) // lower 3 bits - push to bit 8
                   | (offset & 0xFCu); // lower 2-7 bits (0xFCu = 1111 1100 or 7654 3210, 1111 = bits 4-7, 1100 = bits 2-3, so range is  bits 2-7);
     out32(0xCF8, addr); // I/O CONFIG_ADDRESS is 0xCF8
     return in32(0xCFC); // I/O CONFIG_DATA is 0xCFC
 }
+
+
 
 static void tulip_out32(uint16_t port, uint32_t value) {
     __asm volatile ("outl %0, %1" : : "a"(value), "Nd"(port));
@@ -332,7 +334,7 @@ int tulip_eth_init(unsigned bus, unsigned slot, unsigned fn,
     return 1;
 }
 
-int eth_send(const uint8_t *frame, unsigned len) {
+int tulip_send(const uint8_t *frame, unsigned len) {
     uint16_t io = active_base;
     if (io == NO_PORT || !frame || len < 14 || len > 1514 ||
         (tx_wait(io) & OWN) || (csr_read(io, CSR_STATUS) & STATUS_FATAL))
@@ -348,7 +350,7 @@ int eth_send(const uint8_t *frame, unsigned len) {
            (csr_read(io, CSR_STATUS) & STATUS_FATAL) ? -1 : 1;
 }
 
-int eth_recv(uint8_t *frame, unsigned cap) {
+int tulip_recv(uint8_t *frame, unsigned cap) {
     uint16_t io = active_base;
     if (io == NO_PORT || !frame || !cap)
         return -1;

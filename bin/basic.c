@@ -5,6 +5,10 @@
 #include "../console/console.h"
 #include "../networking/netcard.h"
 #include "../networking/net.h"
+#include "../networking/net_route.h"
+#include "../networking/e1000.h"
+#include "../networking/timer.h"
+#include "../networking/http.h"
 
 static void error(const char *msg) {
     console_print(msg);
@@ -174,54 +178,109 @@ void netcards(void) {
     }
 }
 
-static void setup_network(void) {
-    uint8_t mac[6];
+static int setup_network(const char *set_ip) {
+    static uint8_t mac[6];
+    static int nic_ready = 0;
+    static uint32_t configured_ip = 0;
+
     uint32_t local_ip;
+    uint32_t mask;
+    uint32_t gateway;
 
-    if (!net_parse_ipv4("172.24.48.50", &local_ip)) {
+    if (!set_ip || !net_parse_ipv4(set_ip, &local_ip)) {
         console_print("Invalid local IP\n");
-        return;
+        return 0;
     }
 
-    if (!tulip_read_mac(0, 0x0a, 0, mac)) {
-        console_print("Tulip MAC read failed\n");
-        return;
+    /* VirtualBox NAT configuration */
+    if (!net_parse_ipv4("255.255.255.0", &mask) ||
+        !net_parse_ipv4("10.0.2.2", &gateway)) {
+        console_print("Invalid network configuration\n");
+        return 0;
     }
 
-    if (tulip_eth_init(0, 0x0a, 0, mac) != 1) {
-        console_print("Tulip init failed\n");
-        return;
+    /* Initialize the NIC only once. */
+    if (!nic_ready) {
+        if (pci_read(0, 0x03, 0, 0x00) == 0x100e8086u) {
+            volatile void *bar0 = e1000_map_bar0(0, 0x03, 0);
+
+            if (!bar0 || !net_use_e1000(0, 0x03, 0, bar0, mac)) {
+                console_print("E1000 init failed\n");
+                return 0;
+            }
+
+        } else if (pci_read(0, 0x0a, 0, 0x00) == 0x00091011u) {
+            if (!net_use_tulip(0, 0x0a, 0, mac)) {
+                console_print("Tulip init failed\n");
+                return 0;
+            }
+
+        } else {
+            console_print("No supported NIC found\n");
+            return 0;
+        }
+
+        nic_ready = 1;
     }
 
-    net_configure(mac, local_ip);
-    console_print("Tulip ready\n");
+    /*
+     * Only reconfigure when the IP changes.
+     * This preserves the ARP cache between ping commands.
+     */
+    if (configured_ip != local_ip) {
+        net_configure(mac, local_ip);
+        net_set_route(local_ip, mask, gateway);
+
+        configured_ip = local_ip;
+    }
+
+    return 1;
 }
 
-void ping(void) {
-    const char *target = "172.24.48.1";
+#ifndef PING_ATTEMPTS
+#define PING_ATTEMPTS 3
+#endif
+void ping(const char *argv[]) {
+    if (!argv[1] || !argv[2]) {
+        console_print("Usage: ping <local_ip> <target_ip>\n");
+        return;
+    }
+
+    const char *target = argv[2];
     uint32_t target_ip;
 
     if (!net_parse_ipv4(target, &target_ip)) {
-        console_print("Invalid IP address\n");
+        console_print("Invalid target IP\n");
         return;
     }
 
-    setup_network();
+    if (!setup_network(argv[1]))
+        return;
 
-    uint8_t mac_out[8];
-    int result = net_ping(target_ip);
+    http_get(0xc0a8000au, 8080, "/");
 
-    if (result == 1) {
-        console_print("Reply from ");
-        console_print(target);
-        console_putc('\n');
-    } else if (result == 0) {
-        console_print("No reply (ARP or ping timed out)\n");
-    } else {
-        console_print("Ping failed (configuration or driver error)\n");
+    for (unsigned attempt = 0; attempt < PING_ATTEMPTS; ++attempt) {
+        int result = net_ping(target_ip);
+
+        if (result == 1) {
+            console_print("Reply from ");
+            console_print(target);
+            console_putc('\n');
+            return;
+        }
+
+        if (result < 0) {
+            console_print("Ping failed (configuration or driver error)\n");
+            return;
+        }
+
+        if (attempt + 1 < PING_ATTEMPTS)
+            console_print("Request timed out, retrying...\n");
     }
+
+    console_print("No reply after 3 attempts\n");
 }
 
-void clear() {
+void clear(void) {
     console_clear();
 }

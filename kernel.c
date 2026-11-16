@@ -4,8 +4,14 @@
 #include "shell/shell.h"
 #include "shell/login.h"
 #include "account/account.h"
+#include "networking/timer.h"
 
 void kernel_main(void) {
+    if (timer_init())
+        console_print("TIMER: initialized\n");
+    else
+        console_print("TIMER: initialization failed\n");
+
     static const char notes[] = "Hello from notes.txt!\nThis file lives in RAM.\n";
     static const char script[] = "echo \"Running demo.sh\"\nls\ncat notes.txt";
 

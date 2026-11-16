@@ -13,6 +13,9 @@
  * This is single-threaded, same-link only, and uses no malloc or libc.
  */
 #include <stdint.h>
+#include "../console/console.h"
+#include "net_route.h"
+#include "timer.h"
 
 /* Provide these two hooks in your NIC driver. All frames start at the
  * Ethernet destination MAC. No VLAN tag, preamble or FCS is supplied here.
@@ -43,6 +46,15 @@ static uint8_t rx[1536];
 static const uint8_t broadcast[MAC_LEN] = {255, 255, 255, 255, 255, 255};
 static const uint8_t zero_mac[MAC_LEN];
 static const uint8_t echo_data[ICMP_DATA] = {'T', '6', '4', '!'};
+
+uint32_t net_local_ip(void) {
+    return own_ip;
+}
+
+void net_local_mac(uint8_t mac[6]) {
+    for (unsigned i = 0; i < 6; ++i)
+        mac[i] = own_mac[i];
+}
 
 static void copy(uint8_t *to, const uint8_t *from, unsigned len) {
     for (unsigned i = 0; i < len; ++i)
@@ -160,7 +172,7 @@ static int is_arp(unsigned len) {
 }
 
 /* The peer might need to resolve OUR MAC before it can return a ping. */
-static void arp_answer(void) {
+void arp_answer(void) {
     const uint8_t *a = rx + ETH_HDR;
     if (get16(a + 6) == ARP_REQUEST && get32(a + 24) == own_ip
         && (same(rx, broadcast, MAC_LEN) || same(rx, own_mac, MAC_LEN)))
@@ -168,52 +180,140 @@ static void arp_answer(void) {
 }
 
 int net_arp(uint32_t target, uint8_t mac_out[6]) {
-    if (!can_probe(target) || arp_send(ARP_REQUEST, broadcast, target) != 1)
+    if (!can_probe(target))
         return -1;
 
-    for (unsigned i = 0; i < NET_POLL_LIMIT; ++i) {
+    if (arp_send(ARP_REQUEST, broadcast, target) != 1)
+        return -1;
+
+    uint64_t start = net_millis();
+
+    while (net_millis() - start < 2000) {
         int len = eth_recv(rx, sizeof rx);
+
         if (len < 0 || (unsigned)len > sizeof rx)
             return -1;
+
+        if (len == 0) {
+            __asm volatile ("pause");
+            continue;
+        }
+
         if (!is_arp((unsigned)len))
             continue;
 
         const uint8_t *a = rx + ETH_HDR;
+
         if (get16(a + 6) == ARP_REPLY && get32(a + 14) == target
             && get32(a + 24) == own_ip && same(rx, own_mac, MAC_LEN)
             && same(a + 18, own_mac, MAC_LEN)) {
+
+            console_print("ARP: gateway MAC resolved\n");
+
             copy(mac_out, a + 8, MAC_LEN);
             return 1;
         }
+
         arp_answer();
     }
+
     return 0;
 }
 
 static int is_echo_reply(unsigned len, uint32_t target, uint16_t seq) {
-    if (len < ETH_HDR + IP_HDR || get16(rx + 12) != ETH_IP
-        || !same(rx, own_mac, MAC_LEN))
+    if (len < ETH_HDR + IP_HDR) {
+        console_print("ICMP: Frame too short\n");
         return 0;
+    }
+
+    if (get16(rx + 12) != ETH_IP) {
+        // Other Ethernet frames, such as ARP, are normal.
+        return 0;
+    }
+
+    console_print("ICMP: IPv4 frame received\n");
+
+    if (!same(rx, own_mac, MAC_LEN)) {
+        console_print("ICMP: Wrong destination MAC\n");
+        return 0;
+    }
 
     const uint8_t *ip = rx + ETH_HDR;
     unsigned hdr_len = (ip[0] & 15u) * 4;
-    unsigned total = get16(ip + 2);
-    if (ip[0] >> 4 != 4 || hdr_len < IP_HDR || total > len - ETH_HDR
-        || total < hdr_len + ICMP_HDR + ICMP_DATA || ip[9] != 1
-        || (get16(ip + 6) & 0x3fffu)    /* More fragments or offset. */
-        || get32(ip + 12) != target || get32(ip + 16) != own_ip
-        || checksum(ip, hdr_len) != 0)
+
+    if ((ip[0] >> 4) != 4 || hdr_len < IP_HDR ||
+        len < ETH_HDR + hdr_len) {
+        console_print("ICMP: Invalid IPv4 header\n");
         return 0;
+    }
+
+    unsigned total = get16(ip + 2);
+
+    if (total > len - ETH_HDR ||
+        total < hdr_len + ICMP_HDR + ICMP_DATA) {
+        console_print("ICMP: Invalid IP length\n");
+        return 0;
+    }
+
+    if (ip[9] != 1) {
+        console_print("ICMP: Not ICMP\n");
+        return 0;
+    }
+
+    if (get16(ip + 6) & 0x3fffu) {
+        console_print("ICMP: Fragmented packet\n");
+        return 0;
+    }
+
+    if (get32(ip + 12) != target) {
+        console_print("ICMP: Wrong source IP\n");
+        return 0;
+    }
+
+    if (get32(ip + 16) != own_ip) {
+        console_print("ICMP: Wrong destination IP\n");
+        return 0;
+    }
+
+    if (checksum(ip, hdr_len) != 0) {
+        console_print("ICMP: Invalid IP checksum\n");
+        return 0;
+    }
 
     const uint8_t *icmp = ip + hdr_len;
-    return icmp[0] == 0 && icmp[1] == 0 && get16(icmp + 4) == ECHO_ID
-        && get16(icmp + 6) == seq && same(icmp + ICMP_HDR, echo_data, ICMP_DATA)
-        && checksum(icmp, total - hdr_len) == 0;
+
+    if (icmp[0] != 0 || icmp[1] != 0) {
+        console_print("ICMP: Not an echo reply\n");
+        return 0;
+    }
+
+    if (get16(icmp + 4) != ECHO_ID) {
+        console_print("ICMP: Wrong echo ID\n");
+        return 0;
+    }
+
+    if (get16(icmp + 6) != seq) {
+        console_print("ICMP: Wrong sequence number\n");
+        return 0;
+    }
+
+    if (!same(icmp + ICMP_HDR, echo_data, ICMP_DATA)) {
+        console_print("ICMP: Payload mismatch\n");
+        return 0;
+    }
+
+    if (checksum(icmp, total - hdr_len) != 0) {
+        console_print("ICMP: Invalid ICMP checksum\n");
+        return 0;
+    }
+
+    console_print("ICMP: Valid echo reply!\n");
+    return 1;
 }
 
 int net_ping(uint32_t target) {
     uint8_t peer_mac[MAC_LEN];
-    int result = net_arp(target, peer_mac);
+    int result = net_resolve(target, peer_mac);
     if (result != 1)
         return result;
 
@@ -241,14 +341,36 @@ int net_ping(uint32_t target) {
     if (eth_send(f, sizeof f) != 1)
         return -1;
 
-    for (unsigned i = 0; i < NET_POLL_LIMIT; ++i) {
+    uint64_t start = net_millis();
+
+    while (net_millis() - start < 2000) {
         int len = eth_recv(rx, sizeof rx);
+
         if (len < 0 || (unsigned)len > sizeof rx)
             return -1;
+
+        if (len == 0) {
+            __asm volatile ("pause");
+            continue;
+        }
+
         if (is_echo_reply((unsigned)len, target, seq))
             return 1;
+
         if (is_arp((unsigned)len))
             arp_answer();
     }
+
     return 0;
+}
+
+void net_handle_arp_frame(const uint8_t *frame, unsigned len) {
+    if (!frame || len > sizeof rx)
+        return;
+
+    for (unsigned i = 0; i < len; ++i)
+        rx[i] = frame[i];
+
+    if (is_arp(len))
+        arp_answer();
 }
