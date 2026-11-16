@@ -2,6 +2,7 @@
 #include "../console/console.h"
 #include "../filesystem/fs.h"
 #include "../peripherals/keyboard.h"
+#include "../bin/basic.h"
 
 enum { LINE_CAP = 128, MAX_ARGS = 8, MAX_SCRIPT_DEPTH = 4 };
 
@@ -21,30 +22,6 @@ static int error(const char *msg) {
     console_print(msg);
     console_putc('\n');
     return 1;
-}
-
-static void listdir(const char *name) {
-    for (unsigned slot = 0;; ++slot) {
-        unsigned dir_ino = fs_absolute(name);
-        unsigned ino;
-        const char *name = fs_entry(dir_ino, slot, &ino);
-        if (!name)
-            break;
-        /* Inode numbers fit in two digits in this filesystem. */
-         /* ino < 10 then its number is 0-9, else we divide by 1, 
-         * so e.g. 16/10 = 1;
-         * Modulo gives us the remainder, so 16/10 = 1, and 16 % 10 = 6,
-         * combined it gives 16;
-         * The first leading space ' ' mean is we get 2, then it won't write 02, 
-         * but just 2 instead. The '0' on the second entry turns a number into
-         * into its display charcter, meaning it goes from '0' + 6 to '6';
-        */
-        console_putc(ino < 10 ? ' ' : '0' + ino / 10);
-        console_putc('0' + ino % 10);
-        console_putc(' ');
-        console_print(name);
-        console_putc('\n');
-    }
 }
 
 static int execute(const char *line, unsigned depth, unsigned script_argc, const char *const *script_argv);
@@ -145,37 +122,21 @@ static int execute(const char *line, unsigned depth,
     // What happens if x amount of args
     if (!argc)
         return 0;
-    if (equal(argv[0], "help")) {
-        console_print("help  ls  cat FILE  echo WORDS  sh FILE  clear\n");
-    } else if (equal(argv[0], "listdir")) {
-        if (argc != 2)
-            return error("usage: listdir DIR");
-        listdir(argv[1]);
-    } else if (equal(argv[0], "cd")) {
-        if (argc != 2)
-            return error("usage: cd DIR");
-        fs_goto(argv[1]);
-    } else if (equal(argv[0], "cat")) {
-        if (argc != 2)
-            return error("usage: cat FILE");
-        unsigned len;
-        const char *text = fs_read(argv[1], &len);
-        if (!text)
-            return error("cat: file not found");
-        console_write(text, len);
-    } else if (equal(argv[0], "echo")) {
-        for (unsigned i = 1; i < argc; ++i) {
-            if (i > 1)
-                console_putc(' ');
-            console_print(argv[i]);
-        }
-        console_putc('\n');
-    } else if (equal(argv[0], "sh")) {
+    
+    if (equal(argv[0], "help")) {               help(); } 
+    else if (equal(argv[0], "ls")) {            ls(argc, argv); }
+    else if (equal(argv[0], "cat")) {           cat(argc, argv); }
+    else if (equal(argv[0], "echo")) {          echo(argc, argv); }
+    else if (equal(argv[0], "cd")) {            cd(argc, argv); }
+    else if (equal(argv[0], "netinfo")) {       netinfo(); }
+    else if (equal(argv[0], "netcards")) {      netcards(); }
+    else if (equal(argv[0], "ping")) {          ping(); }
+    else if (equal(argv[0], "clear")) {         clear(); }
+    // Other commands that aren't in an include file like basich 
+    else if (equal(argv[0], "run")) {
         if (argc < 2)
-            return error("usage: sh FILE [ARG ...]");
+            return error("usage: run FILE [ARG ...]");
         return run_script(argv[1], depth, argc - 2, argv + 2, 0);
-    } else if (equal(argv[0], "clear")) {
-        console_clear();
     } else {
         char path[sizeof "/bin/" + 29] = "/bin/";
         unsigned end = sizeof "/bin/" - 1;
@@ -190,6 +151,7 @@ static int execute(const char *line, unsigned depth,
         path[end] = '\0';
         return run_script(path, depth, argc - 1, argv + 1, 1);
     }
+    
     return 0;
 }
 

@@ -100,11 +100,12 @@ void handle_mouse(unsigned code) {
     if (!(flags & 0x40))
         mouse_px = clamp(mouse_px + dx, VGA_WIDTH * X_COUNTS_PER_CELL - 1);
     if (!(flags & 0x80))
-        mouse_py = clamp(mouse_py - dy, VGA_HEIGHT * Y_COUNTS_PER_CELL - 1);
+        mouse_py = clamp(mouse_py + dy, VGA_HEIGHT * Y_COUNTS_PER_CELL - 1);
 
     int col = mouse_px / X_COUNTS_PER_CELL;
     int row = mouse_py / Y_COUNTS_PER_CELL;
     int current_idx = row * VGA_WIDTH + col;
+    console_set_cursor((unsigned)current_idx);
     
     mouse_select_cell(current_idx, left_btn);
     /*

@@ -12,7 +12,8 @@ CFLAGS = -m64 -std=c11 -Os -ffreestanding -fno-builtin \
 C_OBJECTS = kernel.o filesystem/fs.o shell/shell.o \
             console/console.o peripherals/keyboard.o \
             peripherals/mouse.o console/tty.o shell/login.o \
-            peripherals/vmmouse.o
+            peripherals/vmmouse.o bin/basic.o networking/netcard.o \
+			networking/net.o
 include account/account.mk
 CPPFLAGS += -Ifilesystem -Ishell -Iconsole -Ikeyboard -Imouse
 
