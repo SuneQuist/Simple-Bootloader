@@ -63,14 +63,30 @@ static uint32_t in32(uint16_t port) {
 }
 
 /* Read a 32-bit DWORD from PCI configuration space on bus 0. */
+/* https://0x04.net/~mwk/doc/pci/PCI%20Local%20Bus%20Specification%20Revision%203.0.pdf?utm_source=chatgpt.com */
+/* Section 3.2.2.3.2; */
 uint32_t pci_read(unsigned bus, unsigned slot, unsigned fn, unsigned offset) {
-    uint32_t addr = 0x80000000u
-                  | ((bus & 0xFFu) << 16) 
-                  | ((slot & 0x1Fu) << 11)
-                  | ((fn & 0x07u) << 8)
-                  | (offset & 0xFCu);
-    out32(0xCF8, addr);
-    return in32(0xCFC);
+    // equal to writing (1u << 31), each number after 0x equates to 0000, so 0x8u means 1000 cause its bit value is 8
+    // out of 0000 8 4 2 1, 0xC would equate to 1100 (12);
+    uint32_t addr = 0x80000000u // sets first bit to 1 (enabled)
+                  // bus & 0xFFu (1111 1111) meaning only the lowest 8 bits are taken with it
+                  // Bad example: 0x1CFu & 0xFF would mean you send 0x0CF, so it only sends the bottom 8 bits that
+                  //    match the bad bus.
+                  // Good example: 0xCFu && 0xFF would you mean send 0xCF, because & operator just checks if both are there.
+                  //    meaning since we are comparing against all 1's (FF - 1111 1111) then if we simply have a 1 as well,
+                  //    then we keep it. 
+                  //    0xCFu = 1100 1111
+                  //    0xFFu = 1111 1111 
+                  //  & -----------------
+                  //            1100 1111
+                  // Bit number:   3  2  1  0
+                  // Place value:  8  4  2  1
+                  | ((bus & 0xFFu) << 16) // lower 8 bits 
+                  | ((slot & 0x1Fu) << 11) // lower 5 bits
+                  | ((fn & 0x07u) << 8) // lower 3 bits
+                  | (offset & 0xFCu); // lower 2-7 bits (0xFCu = 1111 1100 or 7654 3210, 1111 = bits 4-7, 1100 = bits 2-3, so range is  bits 2-7);
+    out32(0xCF8, addr); // I/O CONFIG_ADDRESS is 0xCF8
+    return in32(0xCFC); // I/O CONFIG_DATA is 0xCFC
 }
 
 static void tulip_out32(uint16_t port, uint32_t value) {

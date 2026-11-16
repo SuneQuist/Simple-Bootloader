@@ -139,9 +139,9 @@ void netinfo() {
 }
 
 void netcards(void) {
-    for (unsigned bus = 0; bus < 256; ++bus) {
-        for (unsigned slot = 0; slot < 32; ++slot) {
-            uint32_t id = pci_read(bus, slot, 0, 0x00);
+    for (unsigned bus = 0; bus < 256; ++bus) { // 8 bits total so 256 possible combinations 16-23
+        for (unsigned slot = 0; slot < 32; ++slot) { // 4 bts total so 32 possible combinations 11-15
+            uint32_t id = pci_read(bus, slot, 0, 0x00); 
             if ((id & 0xffffu) == 0xffffu)
                 continue;
 
@@ -149,7 +149,7 @@ void netcards(void) {
             uint32_t header = pci_read(bus, slot, 0, 0x0c);
             unsigned functions = (header & (1u << 23)) ? 8 : 1;
 
-            for (unsigned fn = 0; fn < functions; ++fn) {
+            for (unsigned fn = 0; fn < functions; ++fn)  {
                 if (fn != 0)
                     id = pci_read(bus, slot, fn, 0x00);
 
