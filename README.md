@@ -1,20 +1,14 @@
-# Simple-Bootloader
+# TINY64-OS
 
-To build and run:
-
+Install Qemu on system:
 ```sh
-make && make run
+sudo apt install qemu-system
 ```
 
 To rebuild everything from scratch:
 
 ```sh
-make clean && make && make run
-```
-
-Install Qemu on system:
-```sh
-sudo apt install qemu-system
+make clean && make && make run QEMU='qemu-system-x86_64 -cpu max -machine pc,vmport=on'
 ```
 
 ## Boot sequence
