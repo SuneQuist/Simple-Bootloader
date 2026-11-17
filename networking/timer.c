@@ -83,7 +83,7 @@ int timer_init(void) {
 }
 
 uint64_t net_millis(void) {
-    if (!tsc_hz)
+    if (tsc_hz < 1000)
         return 0;
 
     uint64_t cycles_per_ms = tsc_hz / 1000;

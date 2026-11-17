@@ -4,10 +4,10 @@
 #include "../filesystem/fs.h"
 #include "../console/console.h"
 #include "../networking/netcard.h"
+#include "../networking/timer.h"
+#include "../networking/e1000.h"
 #include "../networking/net.h"
 #include "../networking/net_route.h"
-#include "../networking/e1000.h"
-#include "../networking/timer.h"
 #include "../networking/http.h"
 
 static void error(const char *msg) {
@@ -178,7 +178,12 @@ void netcards(void) {
     }
 }
 
-static int setup_network(const char *set_ip) {
+int setup_network(const char *set_ip) {
+    if (!timer_init()) {
+        console_print("Network timer initialization failed\n");
+        return 0;
+    }
+
     static uint8_t mac[6];
     static int nic_ready = 0;
     static uint32_t configured_ip = 0;
@@ -237,10 +242,13 @@ static int setup_network(const char *set_ip) {
     return 1;
 }
 
+
 #ifndef PING_ATTEMPTS
 #define PING_ATTEMPTS 3
 #endif
-void ping(const char *argv[]) {
+
+void ping(const char *argv[])
+{
     if (!argv[1] || !argv[2]) {
         console_print("Usage: ping <local_ip> <target_ip>\n");
         return;
@@ -254,10 +262,14 @@ void ping(const char *argv[]) {
         return;
     }
 
-    if (!setup_network(argv[1]))
+    if (!setup_network(argv[1])) {
+        console_print("Network initialization failed\n");
         return;
+    }
 
-    http_get(0xc0a8000au, 8080, "/");
+    console_print("Pinging ");
+    console_print(target);
+    console_print("...\n");
 
     for (unsigned attempt = 0; attempt < PING_ATTEMPTS; ++attempt) {
         int result = net_ping(target_ip);
@@ -270,7 +282,7 @@ void ping(const char *argv[]) {
         }
 
         if (result < 0) {
-            console_print("Ping failed (configuration or driver error)\n");
+            console_print("Ping failed (network or driver error)\n");
             return;
         }
 
@@ -278,7 +290,54 @@ void ping(const char *argv[]) {
             console_print("Request timed out, retrying...\n");
     }
 
-    console_print("No reply after 3 attempts\n");
+    console_print("No reply after ");
+    console_print("3");
+    console_print(" attempts\n");
+}
+
+
+void http(const char *argv[])
+{
+    if (!argv[1] || !argv[2] || !argv[3] || !argv[4]) {
+        console_print("Usage: http <local_ip> <server_ip> <port> <host> [path]\n");
+        return;
+    }
+
+    uint32_t server_ip;
+
+    if (!net_parse_ipv4(argv[2], &server_ip)) {
+        console_print("Invalid server IP\n");
+        return;
+    }
+
+    unsigned port = 0;
+
+    for (const char *p = argv[3]; *p; ++p) {
+        if (*p < '0' || *p > '9' || port > (65535u - (unsigned)(*p - '0')) / 10u) {
+            console_print("Invalid port\n");
+            return;
+        }
+
+        port = port * 10u + (unsigned)(*p - '0');
+    }
+
+    if (port == 0) {
+        console_print("Invalid port\n");
+        return;
+    }
+
+    const char *host = argv[4];
+    const char *path = argv[5] ? argv[5] : "/";
+
+    if (path[0] != '/') {
+        console_print("Path must start with /\n");
+        return;
+    }
+
+    if (!setup_network(argv[1]))
+        return;
+
+    http_get(server_ip, (uint16_t)port, host, path);
 }
 
 void clear(void) {

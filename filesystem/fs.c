@@ -168,6 +168,9 @@ void fs_init(void) {
     static const char hello[] = "echo 'HELLO WORLD!'\n";
     put_as("/bin/ls", INODE_FILE, ls, sizeof ls - 1, UID_ROOT, 0755);
     put_as("/bin/hello", INODE_FILE, hello, sizeof hello - 1, UID_ROOT, 0755);
+
+    put_as("/vars", INODE_DIR, 0, 0, UID_ROOT, 0755);
+    put_as("/vars/history", INODE_FILE, "", 0, UID_ROOT, 0666);
 }
 
 unsigned fs_put(const char *path, unsigned char type,

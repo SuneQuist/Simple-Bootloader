@@ -8,7 +8,9 @@ void echo(unsigned argc, const char *argv[]);
 void cd(unsigned argc, const char *argv[]);
 void netinfo(void);
 void netcards(void);
+int setup_network(const char *set_ip);
 void ping(const char *argv[]);
+void http(const char *argv[]);
 void clear(void);
 
 #endif

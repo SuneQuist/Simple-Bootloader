@@ -1,17 +1,18 @@
 #include <stdint.h>
-#include "console/console.h"
 #include "filesystem/fs.h"
-#include "peripherals/keyboard.h"
+#include "console/console.h"
+#include "shell/terminal.h"
 #include "shell/shell.h"
 #include "shell/login.h"
 #include "account/account.h"
+#include "peripherals/keyboard.h"
+#include "peripherals/mouse.h"
+#include "peripherals/interrupts.h"
+#include "peripherals/vmmouse.h"
 #include "networking/timer.h"
 #include "ux/framebuffer.h"
 #include "ux/desktop.h"
-#include "peripherals/mouse.h"
-#include "peripherals/vmmouse.h"
 #include "ux/cursor.h"
-#include "peripherals/interrupts.h"
 #include "ux/font.h"
 
 extern volatile uint32_t irq12_count;
@@ -66,13 +67,13 @@ static void activate_framebuffer(void) {
         return;
     }
 
-    fb_clear(0x00202020);
+    //fb_clear(0x00202020);
 
     /* Blue bar: framebuffer width */
-    fb_rect(0, 20, (int)fb_width, 20, 0x000000FF);
+    //fb_rect(0, 20, (int)fb_width, 20, 0x000000FF);
 
     /* Green bar: framebuffer height */
-    fb_rect(0, 60, (int)fb_height, 20, 0x0000FF00);
+    //fb_rect(0, 60, (int)fb_height, 20, 0x0000FF00);
 
     /* Yellow background, black I */
     volatile uint16_t *vga = (volatile uint16_t *)0xB8000;
@@ -106,6 +107,7 @@ void kernel_main(void)
     activate_framebuffer();
 
     keyboard_init();
+    fs_init();
 
     /*
      * Install the IDT and configure the PIC.
@@ -114,88 +116,34 @@ void kernel_main(void)
     interrupts_init();
 
     int mouse_ok = keyboard_enable_mouse();
-if (fb_active) {
-    mouse_graphics_enable();
+    if (fb_active) {
+        /*
+        * Desktop has already been drawn by
+        * activate_framebuffer().
+        */
 
-    if (mouse_ok)
-        interrupts_enable();
+        terminal_init();
 
-    #define TEXT_X          180
-    #define TEXT_Y          395
-    #define TEXT_SCALE      2
-    #define TEXT_COLS       38
-    #define TEXT_ROWS       5
-    #define TEXT_ADVANCE    14
-    #define TEXT_LINE_HEIGHT 30
+        mouse_graphics_enable();
 
-    static char lines[TEXT_ROWS][TEXT_COLS + 1];
-    static unsigned row = 0;
-    static unsigned col = 0;
-
-    for (;;) {
-        mouse_graphics_refresh();
-
-        int key = keyboard_try_getc();
-
-        if (key >= 0) {
-            int changed = 0;
-
-            if (key == '\b') {
-                if (col > 0) {
-                    lines[row][--col] = '\0';
-                    changed = 1;
-                }
-            }
-            else if (key == '\n') {
-                if (row + 1 < TEXT_ROWS) {
-                    row++;
-                    col = 0;
-                    changed = 1;
-                }
-            }
-            else if (key >= 32 && key <= 126) {
-                if (col >= TEXT_COLS) {
-                    if (row + 1 < TEXT_ROWS) {
-                        row++;
-                        col = 0;
-                    } else {
-                        continue;
-                    }
-                }
-
-                lines[row][col++] = (char)key;
-                lines[row][col] = '\0';
-                changed = 1;
-            }
-
-            if (changed) {
-                /*
-                 * Clear only the keyboard test area.
-                 */
-                fb_rect(
-                    TEXT_X,
-                    TEXT_Y,
-                    TEXT_COLS * TEXT_ADVANCE,
-                    TEXT_ROWS * TEXT_LINE_HEIGHT,
-                    0x00FFFFFF
-                );
-
-                /*
-                 * Redraw every line.
-                 */
-                for (unsigned i = 0; i < TEXT_ROWS; i++) {
-                    fb_text(
-                        TEXT_X,
-                        TEXT_Y + i * TEXT_LINE_HEIGHT,
-                        lines[i],
-                        0x0023344B,
-                        TEXT_SCALE
-                    );
-                }
-            }
+        if (!timer_init()) {
+            console_print("Network timer initialization failed\n");
         }
 
-        __asm volatile ("pause");
+        if (mouse_ok)
+            interrupts_enable();
+
+        for (;;) {
+            mouse_graphics_refresh();
+
+            terminal_update();
+
+            int wheel = mouse_take_wheel();
+
+            if (wheel != 0 && terminal_active())
+                terminal_scroll(-wheel * 3);
+
+            __asm volatile ("pause");
+        }
     }
-}
 }

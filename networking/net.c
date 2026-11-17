@@ -16,6 +16,7 @@
 #include "../console/console.h"
 #include "net_route.h"
 #include "timer.h"
+#include "../shell/terminal.h"
 
 /* Provide these two hooks in your NIC driver. All frames start at the
  * Ethernet destination MAC. No VLAN tag, preamble or FCS is supplied here.
@@ -250,7 +251,7 @@ static int is_echo_reply(unsigned len, uint32_t target, uint16_t seq) {
     unsigned total = get16(ip + 2);
 
     if (total > len - ETH_HDR ||
-        total < hdr_len + ICMP_HDR + ICMP_DATA) {
+        total < hdr_len + ICMP_HDR) {
         console_print("ICMP: Invalid IP length\n");
         return 0;
     }
@@ -282,6 +283,16 @@ static int is_echo_reply(unsigned len, uint32_t target, uint16_t seq) {
 
     const uint8_t *icmp = ip + hdr_len;
 
+    if (icmp[0] == 3) {
+        console_print("ICMP: Destination unreachable\n");
+        return 0;
+    }
+
+    if (icmp[0] == 11) {
+        console_print("ICMP: Time exceeded\n");
+        return 0;
+    }
+
     if (icmp[0] != 0 || icmp[1] != 0) {
         console_print("ICMP: Not an echo reply\n");
         return 0;
@@ -311,8 +322,11 @@ static int is_echo_reply(unsigned len, uint32_t target, uint16_t seq) {
     return 1;
 }
 
-int net_ping(uint32_t target) {
+
+int net_ping(uint32_t target)
+{
     uint8_t peer_mac[MAC_LEN];
+
     int result = net_resolve(target, peer_mac);
     if (result != 1)
         return result;
@@ -323,24 +337,31 @@ int net_ping(uint32_t target) {
     uint16_t seq = ++sequence;
 
     ethernet(f, peer_mac, ETH_IP);
-    ip[0] = 0x45;                  /* IPv4, five 32-bit header words. */
+
+    /* IPv4 header */
+    ip[0] = 0x45;
     put16(ip + 2, IP_HDR + ICMP_HDR + ICMP_DATA);
     put16(ip + 4, seq);
-    ip[8] = 64;                    /* TTL */
-    ip[9] = 1;                     /* ICMP */
+    ip[8] = 64;
+    ip[9] = 1;  /* ICMP */
+
     put32(ip + 12, own_ip);
     put32(ip + 16, target);
     put16(ip + 10, checksum(ip, IP_HDR));
 
-    icmp[0] = 8;                   /* Echo Request */
+    /* ICMP Echo Request */
+    icmp[0] = 8;
     put16(icmp + 4, ECHO_ID);
     put16(icmp + 6, seq);
+
     copy(icmp + ICMP_HDR, echo_data, ICMP_DATA);
     put16(icmp + 2, checksum(icmp, ICMP_HDR + ICMP_DATA));
 
+    /* Transmit packet */
     if (eth_send(f, sizeof f) != 1)
         return -1;
 
+    /* Wait up to two seconds for a reply */
     uint64_t start = net_millis();
 
     while (net_millis() - start < 2000) {
@@ -350,7 +371,7 @@ int net_ping(uint32_t target) {
             return -1;
 
         if (len == 0) {
-            __asm volatile ("pause");
+            __asm volatile("pause");
             continue;
         }
 
@@ -363,6 +384,7 @@ int net_ping(uint32_t target) {
 
     return 0;
 }
+
 
 void net_handle_arp_frame(const uint8_t *frame, unsigned len) {
     if (!frame || len > sizeof rx)

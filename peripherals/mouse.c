@@ -25,7 +25,10 @@ static signed selection_start = 0, selection_end = 0;
 
 // Packet assembly buffer
 static unsigned short mouse_cycle = 0;
-static unsigned short mouse_packet[3];
+static unsigned short mouse_packet[4];
+
+static unsigned mouse_packet_size = 3;
+static volatile int mouse_wheel_pending = 0;
 
 static int clamp(int n, int max) {
     if (n < 0) return 0;
@@ -166,28 +169,65 @@ void mouse_reset_packet(void) {
     prev_left = 0;
 }
 
+void mouse_set_packet_size(unsigned size)
+{
+    if (size != 3 && size != 4)
+        return;
+
+    mouse_packet_size = size;
+    mouse_cycle = 0;
+}
+
+int mouse_take_wheel(void)
+{
+    uint64_t flags;
+
+    __asm volatile ("pushfq\n" "popq %0\n" "cli" : "=r"(flags) : : "memory");
+
+    int wheel = mouse_wheel_pending;
+    mouse_wheel_pending = 0;
+
+    if (flags & (1ULL << 9))
+        __asm volatile ("sti" ::: "memory");
+
+    return wheel;
+}
+
 void handle_mouse(unsigned code) {
     if (graphics_mouse) {
-        fb_rect(40, 10, 20, 20, 0x0000FF00);
+        //fb_rect(40, 10, 20, 20, 0x0000FF00);
     }
 
     // Byte 0 sanity check: Bit 3 must always be 1 in standard PS/2 packets
+    /* The first byte must have bit 3 set. */
     if (mouse_cycle == 0 && !(code & 0x08))
         return;
 
-    mouse_packet[mouse_cycle++] = code;
+    mouse_packet[mouse_cycle++] = (unsigned char)code;
 
-    if (mouse_cycle < 3)
+    if (mouse_cycle < mouse_packet_size)
         return;
 
     mouse_cycle = 0;
 
-    // Decode 3-byte packet
-    unsigned char left_btn = (mouse_packet[0] & 0x01) != 0;
     unsigned flags = mouse_packet[0];
-    // Checks if the ninth bit is 1 or 0, if its Set then -256 with current mouse position x, otherwise -0; Same for Y.
-    signed dx = (int)mouse_packet[1] - ((flags & 0x10) ? 256 : 0);
-    signed dy = (int)mouse_packet[2] - ((flags & 0x20) ? 256 : 0);
+    unsigned char left_btn = (flags & 0x01) != 0;
+
+    int dx = (int)mouse_packet[1] -
+            ((flags & 0x10) ? 256 : 0);
+
+    int dy = (int)mouse_packet[2] -
+            ((flags & 0x20) ? 256 : 0);
+
+    /* Only four-byte packets contain wheel data. */
+    if (mouse_packet_size == 4) {
+        int wheel = mouse_packet[3] & 0x0F;
+
+        if (wheel & 0x08)
+            wheel -= 16;
+
+        mouse_wheel_pending += wheel;
+    }
 
     if (graphics_mouse) {
         mouse_graphics_event(dx, dy, left_btn);

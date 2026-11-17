@@ -1,8 +1,13 @@
+#include <stdint.h>
 #include "shell.h"
 #include "../console/console.h"
 #include "../filesystem/fs.h"
 #include "../peripherals/keyboard.h"
 #include "../bin/basic.h"
+#include "../networking/timer.h"
+#include "../networking/net.h"
+#include "../networking/netcard.h"
+#include "../networking/net_route.h"
 
 enum { LINE_CAP = 128, MAX_ARGS = 8, MAX_SCRIPT_DEPTH = 4 };
 
@@ -54,6 +59,19 @@ static int run_script(const char *path, unsigned depth,
     }
 
     return 0;
+}
+
+static int string_equals(const char *a, const char *b)
+{
+    while (*a && *b) {
+        if (*a != *b)
+            return 0;
+
+        ++a;
+        ++b;
+    }
+
+    return *a == *b;
 }
 
 /* Split on spaces outside double quotes. Quotes are removed. */
@@ -131,6 +149,7 @@ static int execute(const char *line, unsigned depth,
     else if (equal(argv[0], "netinfo")) {       netinfo(); }
     else if (equal(argv[0], "netcards")) {      netcards(); }
     else if (equal(argv[0], "ping")) {          ping(argv); }
+    else if (equal(argv[0], "http")) {          http(argv); }
     else if (equal(argv[0], "clear")) {         clear(); }
     // Other commands that aren't in an include file like basich 
     else if (equal(argv[0], "run")) {

@@ -50,6 +50,60 @@ static signed ps2_write(unsigned short port, unsigned char value) {
     return 0;
 }
 
+/* Wait for a byte from the PS/2 mouse (second port). */
+static int ps2_mouse_read(void)
+{
+    for (unsigned i = 0; i < 100000; i++) {
+        unsigned status = inb(0x64);
+
+        if (!(status & 0x01))
+            continue;
+
+        unsigned char value = inb(0x60);
+
+        /* Ignore keyboard bytes while waiting for mouse data. */
+        if (!(status & 0x20)) {
+            keyboard_irq_scancode(value);
+            continue;
+        }
+
+        if (status & 0xC0)
+            continue;
+
+        return value;
+    }
+
+    return -1;
+}
+
+/* Send a command or parameter to the mouse and wait for ACK. */
+static int ps2_mouse_command(unsigned char value)
+{
+    for (unsigned attempt = 0; attempt < 3; attempt++) {
+        if (!ps2_write(0x64, 0xD4))
+            return 0;
+
+        if (!ps2_write(0x60, value))
+            return 0;
+
+        int response = ps2_mouse_read();
+
+        if (response == 0xFA)
+            return 1;
+
+        if (response != 0xFE)
+            return 0;
+    }
+
+    return 0;
+}
+
+static int ps2_mouse_sample_rate(unsigned char rate)
+{
+    return ps2_mouse_command(0xF3) &&
+           ps2_mouse_command(rate);
+}
+
 #define KEYBOARD_QUEUE_SIZE 256u
 #define KEYBOARD_QUEUE_MASK (KEYBOARD_QUEUE_SIZE - 1u)
 
@@ -85,7 +139,7 @@ static int keyboard_pop_scancode(void)
     return code;
 }
 
-static int absolute_mouse;
+static int absolute_mouse, ctrl_down;
 static unsigned shifts, caps, caps_down, e0_pending, skip;
 void keyboard_init(void)
 {
@@ -95,62 +149,108 @@ void keyboard_init(void)
     scancode_head = 0;
     scancode_tail = 0;
     keyboard_overflows = 0;
+    ctrl_down = 0;
 }
 
-signed keyboard_enable_mouse(void) {
+signed keyboard_enable_mouse(void)
+{
     mouse_reset_packet();
-    
-    if (!ps2_write(0x64, 0xA8) ||  /* Enable the second PS/2 port. */
-        !ps2_write(0x64, 0xD4) ||  /* Route the next byte to the mouse. */
-        !ps2_write(0x60, 0xF4))    /* Enable mouse reporting. */
+    mouse_set_packet_size(3);
+
+    /* Enable second PS/2 port. */
+    if (!ps2_write(0x64, 0xA8))
         return 0;
 
-    for (unsigned i = 0; i < 100000; ++i) {
+    /*
+     * Disable reporting during configuration.
+     * This prevents movement packets from mixing
+     * with command responses.
+     */
+    if (!ps2_mouse_command(0xF5))
+        return 0;
+
+    /*
+     * IntelliMouse wheel detection sequence:
+     * 200, 100, 80 samples per second.
+     */
+    int wheel_supported = 0;
+
+    if (ps2_mouse_sample_rate(200) &&
+        ps2_mouse_sample_rate(100) &&
+        ps2_mouse_sample_rate(80) &&
+        ps2_mouse_command(0xF2)) {
+
+        int device_id = ps2_mouse_read();
+
+        if (device_id == 0x03 || device_id == 0x04)
+            wheel_supported = 1;
+    }
+
+    /* Restore normal sample rate. */
+    ps2_mouse_sample_rate(100);
+
+    /*
+     * Enable IRQ12 in the PS/2 controller
+     * configuration byte.
+     */
+    if (!ps2_write(0x64, 0x20))
+        return 0;
+
+    int config = -1;
+
+    for (unsigned i = 0; i < 100000; i++) {
         unsigned status = inb(0x64);
+
         if (!(status & 0x01))
             continue;
 
-        unsigned char byte = inb(0x60);
-        if ((status & 0xE0) == 0x20) {
-            if (byte != 0xFA)
-                return 0;
+        unsigned char value = inb(0x60);
 
-            /* Read the PS/2 controller configuration byte. */
-            if (!ps2_write(0x64, 0x20))
-                return 0;
-
-            unsigned config = 0;
-            int got_config = 0;
-
-            for (unsigned i = 0; i < 100000; ++i) {
-                if (inb(0x64) & 0x01) {
-                    config = inb(0x60);
-                    got_config = 1;
-                    break;
-                }
-            }
-
-            if (!got_config)
-                return 0;
-
-            /* Enable IRQ12 and enable the second PS/2 clock. */
-            config |= 0x02;
-            config &= ~0x20;
-
-            /* Write the configuration byte back. */
-            if (!ps2_write(0x64, 0x60))
-                return 0;
-
-            if (!ps2_write(0x60, config))
-                return 0;
-
-            absolute_mouse = vmmouse_init();
-            console_print(absolute_mouse ? "VMMouse absolute ready\n"
-                                         : "PS/2 relative fallback\n");
-            return 1;
+        if (status & 0x20) {
+            /* Unexpected mouse response. */
+            continue;
         }
+
+        config = value;
+        break;
     }
-    return 0;
+
+    if (config < 0)
+        return 0;
+
+    config |= 0x02;   /* Enable IRQ12. */
+    config &= ~0x20;  /* Enable second PS/2 clock. */
+
+    if (!ps2_write(0x64, 0x60))
+        return 0;
+
+    if (!ps2_write(0x60, (unsigned char)config))
+        return 0;
+
+    /*
+     * Select the packet format before enabling
+     * mouse reporting.
+     */
+    mouse_set_packet_size(wheel_supported ? 4 : 3);
+
+    if (!ps2_mouse_command(0xF4))
+        return 0;
+
+    absolute_mouse = vmmouse_init();
+
+    console_print(
+        wheel_supported
+            ? "PS/2 mouse wheel ready\n"
+            : "PS/2 mouse: no wheel detected\n"
+    );
+
+    console_print(
+        absolute_mouse
+            ? "VMMouse absolute ready\n"
+            : "PS/2 relative fallback\n"
+    );
+
+    return 1;
 }
 
 /*
@@ -189,8 +289,11 @@ signed keyboard_enable_mouse(void) {
  *   -1 = no complete key event
  *  >=0 = decoded character or special key
  */
-static int keyboard_decode(unsigned char code)
+static int keyboard_decode(unsigned char code, unsigned *mods)
 {
+    if (mods)
+        *mods = 0;
+
     if (skip) {
         --skip;
         return -1;
@@ -213,9 +316,27 @@ static int keyboard_decode(unsigned char code)
     if (e0_pending) {
         e0_pending = 0;
 
-        if (!released && extended_keys[key])
-            return extended_keys[key];
+        /* Right Ctrl: E0 1D pressed, E0 9D released. */
+        if (key == 0x1D) {
+            ctrl_down = !released;
+            return -1;
+        }
 
+        if (!released && extended_keys[key]) {
+            if (mods) {
+                *mods = (shifts ? KEY_MOD_SHIFT : 0u) |
+                        (ctrl_down ? KEY_MOD_CTRL : 0u);
+            }
+
+            return extended_keys[key];
+        }
+
+        return -1;
+    }
+
+    /* Left Ctrl: 1D pressed, 9D released. */
+    if (key == 0x1D) {
+        ctrl_down = !released;
         return -1;
     }
 
@@ -241,6 +362,11 @@ static int keyboard_decode(unsigned char code)
     if (released)
         return -1;
 
+    if (mods) {
+        *mods = (shifts ? KEY_MOD_SHIFT : 0u) |
+                (ctrl_down ? KEY_MOD_CTRL : 0u);
+    }
+
     char c = plain[key];
 
     if (!c)
@@ -256,28 +382,39 @@ static int keyboard_decode(unsigned char code)
         : c;
 }
 
-/*
- * Nonblocking: returns -1 if no decoded key is ready.
- */
-int keyboard_try_getc(void)
+int keyboard_try_getc_mod(unsigned *mods)
 {
+    if (mods)
+        *mods = 0;
+
     for (;;) {
         int code = keyboard_pop_scancode();
 
         if (code < 0)
             return -1;
 
-        int key = keyboard_decode((unsigned char)code);
+        unsigned key_mods = 0;
 
-        if (key >= 0)
+        int key = keyboard_decode(
+            (unsigned char)code,
+            &key_mods
+        );
+
+        if (key >= 0) {
+            if (mods)
+                *mods = key_mods;
+
             return key;
+        }
     }
 }
 
-/*
- * Blocking keyboard input, compatible with your shell.
- */
-signed keyboard_getc(void)
+int keyboard_try_getc(void)
+{
+    return keyboard_try_getc_mod(0);
+}
+
+int keyboard_getc(void)
 {
     for (;;) {
         int key = keyboard_try_getc();

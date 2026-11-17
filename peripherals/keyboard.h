@@ -14,10 +14,16 @@ enum {
     KEY_DELETE    = 0x89
 };
 
+enum {
+    KEY_MOD_SHIFT = 1,
+    KEY_MOD_CTRL  = 2
+};
+
 void keyboard_init(void);
 signed keyboard_enable_mouse(void);
-signed keyboard_getc(void);
 void keyboard_irq_scancode(unsigned char code);
+int keyboard_try_getc_mod(unsigned *mods);
 int keyboard_try_getc(void);
+int keyboard_getc(void);
 
 #endif

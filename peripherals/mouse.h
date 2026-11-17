@@ -13,5 +13,7 @@ void mouse_absolute_event(unsigned x, unsigned y, int left_down);
 void mouse_reset_packet(void);
 void handle_mouse(unsigned code);
 void mouse_graphics_refresh(void);
+void mouse_set_packet_size(unsigned size);
+int mouse_take_wheel(void);
 
 #endif

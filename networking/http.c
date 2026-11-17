@@ -311,14 +311,27 @@ static int tcp_wait(tcp_connection *c,
     return 0;
 }
 
+static uint16_t next_http_port = 49152;
+
+static uint16_t http_alloc_port(void)
+{
+    uint16_t port = next_http_port++;
+
+    if (next_http_port > 60999)
+        next_http_port = 49152;
+
+    return port;
+}
+
 int http_get(uint32_t server_ip,
              uint16_t port,
+             const char *host,
              const char *path) {
     tcp_connection c = {0};
 
     c.remote_ip = server_ip;
     c.remote_port = port;
-    c.local_port = 49152;
+    c.local_port = http_alloc_port();;
 
     c.seq = (uint32_t)net_millis() ^ 0x12345678u;
 
@@ -362,8 +375,10 @@ int http_get(uint32_t server_ip,
 
     n = append(request, n, sizeof request, "GET ");
     n = append(request, n, sizeof request, path);
+    n = append(request, n, sizeof request, " HTTP/1.0\r\nHost: ");
+    n = append(request, n, sizeof request, host);
     n = append(request, n, sizeof request,
-               " HTTP/1.0\r\nHost: ");
+            "\r\nConnection: close\r\n\r\n");
     /*
      * Host is set to a fixed value for this
      * minimal example. For name-based virtual

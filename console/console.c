@@ -1,11 +1,12 @@
 #include "console.h"
+#include "../shell/terminal.h"
 
 enum { WIDTH = 80, HEIGHT = 25, CELLS = WIDTH * HEIGHT };
 static volatile unsigned short *const vga = (volatile unsigned short *)0xB8000;
 static unsigned pos;
 
 static void outb(unsigned short port, unsigned char value) {
-    __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
+    __asm volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
 }
 
 void console_set_cursor(unsigned cell) {
@@ -20,12 +21,22 @@ static void cell(unsigned at, char c) {
 }
 
 void console_clear(void) {
+    if (terminal_active()) {
+        terminal_clear();
+        return;
+    }
+
     pos = 0;
     for (unsigned i = 0; i < CELLS; ++i)
         cell(i, ' ');
 }
 
 void console_putc(char c) {
+    if (terminal_active()) {
+        terminal_putc(c);
+        return;
+    }
+
     if (c == '\b') {
         if (pos)
             cell(--pos, ' ');
@@ -48,6 +59,11 @@ void console_putc(char c) {
 }
 
 void console_line_end(void) {
+    if (terminal_active()) {
+        terminal_line_end();
+        return;
+    }
+
     if (pos % WIDTH)
         console_putc('\n');
 }
