@@ -8,11 +8,284 @@
 stage2_start:
     cli                    
 
+    /* Set to 1 for the graphical test; 0 boots the original text shell. */
+    .set GRAPHICS_TEST, 1
+
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov byte ptr [fb_active], 0 /* diagnostics bit: 0 = not enabled; 1 = enabled; */
+    mov byte ptr [vbe_status], 1
+
+.if GRAPHICS_TEST
+
+    /*
+     * Get VBE controller information.
+     *
+     * 0x5000: controller information (512 bytes)
+     * 0x5200: mode information (256 bytes)
+     *
+     * Stage 2 is loaded at 0x8000, so these buffers
+     * do not overlap its code.
+     */
+
+    mov dword ptr [0x5000], 0x32454256   /* "VBE2" */
+
+    xor ax, ax
+    mov es, ax
+    mov di, 0x5000
+    mov ax, 0x4F00
+
+    sti
+    int 0x10
+    cli
+
+    push ax
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    pop ax
+
+    cmp ax, 0x004F
+    jne vbe_use_fallback
+
+    /*
+     * VideoModePtr is a far pointer at controller
+     * information offset 0x0E:
+     *
+     * offset  = [0x500E]
+     * segment = [0x5010]
+     *
+     * Convert segment:offset to physical address.
+     */
+
+    movzx esi, word ptr [0x5010]
+    shl esi, 4
+    movzx eax, word ptr [0x500E]
+    add esi, eax
+
+    mov dword ptr [vbe_list_ptr], esi
+
+    /*
+     * Search the mode list.
+     * Each mode number is a 16-bit value.
+     * 0xFFFF terminates the list.
+     */
+
+    mov word ptr [vbe_modes_checked], 0
+
+vbe_search_loop:
+
+    /* Avoid an unbounded scan if BIOS data is corrupt. */
+    cmp word ptr [vbe_modes_checked], 256
+    jae vbe_use_fallback
+
+    mov esi, dword ptr [vbe_list_ptr]
+
+    /*
+     * In real mode, DS=0 and SI must be 16-bit.
+     * The mode-list pointer can lie above 64 KiB,
+     * so convert the physical address to ES:DI.
+     */
+
+    mov eax, esi
+    mov edx, eax
+    and dx, 0x000F
+    shr eax, 4
+
+    mov es, ax
+    mov di, dx
+
+    mov cx, word ptr es:[di]
+
+    cmp cx, 0xFFFF
+    je vbe_use_fallback
+
+    /* Save the candidate mode number. */
+    mov word ptr [vbe_candidate], cx
+
+    /*
+     * Query this mode.
+     *
+     * BIOS writes its information into 0000:5200.
+     */
+
+    xor ax, ax
+    mov es, ax
+    mov di, 0x5200
+    mov ax, 0x4F01
+
+    sti
+    int 0x10
+    cli
+
+    push ax
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    pop ax
+
+    cmp ax, 0x004F
+    jne vbe_next_mode
+
+    /* Mode must be supported and graphics-capable. */
+    mov ax, word ptr [0x5200]
+    test ax, 0x0001
+    jz vbe_next_mode
+
+    test ax, 0x0010
+    jz vbe_next_mode
+
+    /* Linear framebuffer support. */
+    test ax, 0x0080
+    jz vbe_next_mode
+
+    /* Require 1024x768. */
+    cmp word ptr [0x5200 + 18], 1024
+    jne vbe_next_mode
+
+    cmp word ptr [0x5200 + 20], 768
+    jne vbe_next_mode
+
+    /* Require 32-bit direct color. */
+    cmp byte ptr [0x5200 + 25], 32
+    jne vbe_next_mode
+
+    cmp byte ptr [0x5200 + 27], 6
+    jne vbe_next_mode
+
+    /* RGB888 layout in 32-bit pixels. */
+    cmp byte ptr [0x5200 + 31], 8
+    jne vbe_next_mode
+
+    cmp byte ptr [0x5200 + 32], 16
+    jne vbe_next_mode
+
+    cmp byte ptr [0x5200 + 33], 8
+    jne vbe_next_mode
+
+    cmp byte ptr [0x5200 + 34], 8
+    jne vbe_next_mode
+
+    cmp byte ptr [0x5200 + 35], 8
+    jne vbe_next_mode
+
+    cmp byte ptr [0x5200 + 36], 0
+    jne vbe_next_mode
+
+    /* Physical framebuffer address must be nonzero. */
+    cmp dword ptr [0x5200 + 40], 0
+    je vbe_next_mode
+
+    /* Found a compatible mode. */
+    mov bx, word ptr [vbe_candidate]
+    jmp vbe_activate_mode
+
+vbe_next_mode:
+
+    /*
+     * Advance to the next entry in the mode list.
+     * Preserve the pointer across BIOS calls.
+     */
+    add dword ptr [vbe_list_ptr], 2
+    inc word ptr [vbe_modes_checked]
+    jmp vbe_search_loop
+
+vbe_use_fallback:
+
+    /*
+     * Fall back to the working 0x140 mode.
+     * Query it so the framebuffer metadata is valid.
+     */
+
+    mov word ptr [vbe_candidate], 0x0140
+
+    xor ax, ax
+    mov es, ax
+    mov di, 0x5200
+    mov cx, 0x0140
+    mov ax, 0x4F01
+
+    sti
+    int 0x10
+    cli
+
+    push ax
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    pop ax
+
+    cmp ax, 0x004F
+    jne vbe_failed
+
+    cmp byte ptr [0x5200 + 25], 32
+    jne vbe_failed
+
+    test word ptr [0x5200], 0x0080
+    jz vbe_failed
+
+    cmp dword ptr [0x5200 + 40], 0
+    je vbe_failed
+
+    mov bx, 0x0140
+
+vbe_activate_mode:
+
+    /*
+     * Save framebuffer information before switching modes.
+     */
+
+    mov eax, dword ptr [0x5200 + 40]
+    mov dword ptr [fb_phys], eax
+
+    movzx eax, word ptr [0x5200 + 18]
+    mov dword ptr [fb_width], eax
+
+    movzx eax, word ptr [0x5200 + 20]
+    mov dword ptr [fb_height], eax
+
+    movzx eax, word ptr [0x5200 + 16]
+    mov dword ptr [fb_pitch], eax
+
+    mov dword ptr [fb_bpp], 32
+
+    /*
+     * Set the selected VBE mode.
+     * Bit 14 requests the linear framebuffer.
+     */
+
+    or bx, 0x4000
+    mov ax, 0x4F02
+
+    sti
+    int 0x10
+    cli
+
+    push ax
+    xor ax, ax
+    mov ds, ax
+    pop ax
+
+    cmp ax, 0x004F
+    jne vbe_failed
+
+    mov byte ptr [fb_active], 1
+    mov byte ptr [vbe_status], 3
+    jmp vbe_done
+
+vbe_failed:
+    mov byte ptr [fb_active], 0
+    mov byte ptr [vbe_status], 2
+
+vbe_done:
+    .endif
+
     /* Turn on A20 through the fast A20 gate. */
-    in al, 0x92            # Read the value of current I/O port into al
-    and al, 0xfe           /* Never trigger the reset bit, by clearing bit 0 so the write won't request a reset */
-    or al, 0x02            # Set bit 1, which enables A20
-    out 0x92, al           # Write the modified byte back to the port.
+    in al, 0x92
+    and al, 0xfe
+    or al, 0x02
+    out 0x92, al
 
     lgdt [gdt_descriptor]  # Tell the CPU where gdt is and its size
 
@@ -51,6 +324,29 @@ protected_mode:
     mov dword ptr [0x1000], 0x2003 /* PML4[0] -> PDPT */      # PML4[0] points to the PDPT at 0x2000.
     mov dword ptr [0x2000], 0x3003 /* PDPT[0] -> PD */        # PDPT[0] points to the PD at 0x3000.
     mov dword ptr [0x3000], 0x0083 /* PD[0] -> 2 MiB page */  # PD[0] maps one 2 MiB page at physical 0.
+
+    /* Optional graphics: map four 2 MiB pages at virtual 0x04000000.
+       Align the physical framebuffer down and retain its page offset.
+       2 MiB large pages, uncacheable (PCD/PWT), writable. */
+    cmp byte ptr [fb_active], 1
+    jne fb_map_done
+    mov eax, dword ptr [fb_phys]
+    mov edx, eax
+    and eax, 0xffe00000
+    and edx, 0x001fffff
+    add edx, 0x04000000
+    mov dword ptr [fb_virtual], edx
+    mov edi, 0x3000 + 32 * 8
+    mov ecx, 4
+fb_map_loop:
+    mov edx, eax
+    or edx, 0x9b             /* P, RW, PWT, PCD, PS */
+    mov dword ptr [edi], edx
+    mov dword ptr [edi + 4], 0
+    add eax, 0x200000
+    add edi, 8
+    loop fb_map_loop
+fb_map_done:
 
     # Turn on paging and jump into 64-bit code
     /* Enable PAE and point CR3 at PML4. */
@@ -103,5 +399,43 @@ gdt_descriptor:            # The record that LGDT reads.
     .word gdt_end - gdt - 1  # 16-bit limit: table size minus one, or 31.
     .long gdt              # 32-bit field holding the table's base address.
 
-.section .note.GNU-stack,"",@progbits  # Tell the linker this object doesn't request an executable stack.
+.section .data
 
+/* C-visible boot graphics state. All addresses are below the 2 MiB identity map. */
+.global fb_active
+.global fb_virtual
+.global fb_width
+.global fb_height
+.global fb_pitch
+.global fb_bpp
+.global vbe_status
+.global vbe_attributes
+.global vbe_bpp_detected
+.global vbe_width_detected
+.global vbe_height_detected
+
+.align 4
+fb_active:  .byte 0
+
+.align 4
+fb_phys:    .long 0
+fb_virtual: .long 0
+fb_width:   .long 0
+fb_height:  .long 0
+fb_pitch:   .long 0
+fb_bpp:     .long 0
+
+vbe_status: .byte 0
+vbe_attributes: .byte 0
+vbe_bpp_detected: .byte 0
+
+.align 2
+vbe_width_detected:  .word 0
+vbe_height_detected: .word 0
+
+.align 4
+vbe_candidate: .word 0
+vbe_modes_checked: .word 0
+vbe_list_ptr: .long 0
+
+.section .note.GNU-stack,"",@progbits  # Tell the linker this object doesn't request an executable stack.

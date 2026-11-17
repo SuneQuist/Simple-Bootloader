@@ -1,5 +1,16 @@
+#include <stdint.h>
 #include "mouse.h"
+#include "vmmouse.h"
 #include "../console/console.h"
+#include "../ux/cursor.h"
+#include "../ux/framebuffer.h"
+
+extern uint32_t fb_width;
+extern uint32_t fb_height;
+
+static int graphics_mouse = 0;
+static int gui_mouse_x = 0;
+static int gui_mouse_y = 0;
 
 volatile unsigned short * const VGA_MEM = (volatile unsigned short *)0xB8000;
 
@@ -20,6 +31,71 @@ static int clamp(int n, int max) {
     if (n < 0) return 0;
     if (n > max) return max;
     return n;
+}
+
+void mouse_graphics_enable(void)
+{
+    graphics_mouse = 1;
+
+    gui_mouse_x = (int)fb_width / 2;
+    gui_mouse_y = (int)fb_height / 2;
+
+    cursor_init(gui_mouse_x, gui_mouse_y);
+}
+
+static volatile int mouse_position_changed = 0;
+
+static void mouse_graphics_event(
+    int dx,
+    int dy,
+    int left_down
+) {
+    (void)left_down;
+
+    gui_mouse_x += dx;
+    gui_mouse_y -= dy;
+
+    if (gui_mouse_x < 0)
+        gui_mouse_x = 0;
+
+    if (gui_mouse_y < 0)
+        gui_mouse_y = 0;
+
+    if (gui_mouse_x >= (int)fb_width)
+        gui_mouse_x = (int)fb_width - 1;
+
+    if (gui_mouse_y >= (int)fb_height)
+        gui_mouse_y = (int)fb_height - 1;
+
+    mouse_position_changed = 1;
+}
+
+void mouse_graphics_refresh(void)
+{
+    if (!graphics_mouse)
+        return;
+
+    int x, y;
+    int changed;
+
+    /*
+     * Copy the IRQ-updated position without allowing
+     * the mouse interrupt to modify it halfway through.
+     */
+    uint64_t flags;
+
+    __asm volatile ("pushfq\n" "popq %0\n" "cli" : "=r"(flags) : : "memory");
+
+    changed = mouse_position_changed;
+    x = gui_mouse_x;
+    y = gui_mouse_y;
+    mouse_position_changed = 0;
+
+    if (flags & (1ULL << 9))
+        __asm volatile ("sti" ::: "memory");
+
+    if (changed)
+        cursor_move(x, y);
 }
 
 // Helper: Invert foreground/background colors.
@@ -66,6 +142,19 @@ static void mouse_select_cell(int cell, int left_down) {
 }
 
 void mouse_absolute_event(unsigned x, unsigned y, int left_down) {
+    if (graphics_mouse) {
+        gui_mouse_x = (int)(((uint64_t)x * fb_width) >> 16);
+        gui_mouse_y = (int)(((uint64_t)y * fb_height) >> 16);
+
+        if (gui_mouse_x >= (int)fb_width)
+            gui_mouse_x = (int)fb_width - 1;
+        if (gui_mouse_y >= (int)fb_height)
+            gui_mouse_y = (int)fb_height - 1;
+
+        cursor_move(gui_mouse_x, gui_mouse_y);
+        return;
+    }
+
     unsigned col = vmmouse_cell(x, VGA_WIDTH);
     unsigned row = vmmouse_cell(y, VGA_HEIGHT);
 
@@ -78,6 +167,10 @@ void mouse_reset_packet(void) {
 }
 
 void handle_mouse(unsigned code) {
+    if (graphics_mouse) {
+        fb_rect(40, 10, 20, 20, 0x0000FF00);
+    }
+
     // Byte 0 sanity check: Bit 3 must always be 1 in standard PS/2 packets
     if (mouse_cycle == 0 && !(code & 0x08))
         return;
@@ -95,6 +188,11 @@ void handle_mouse(unsigned code) {
     // Checks if the ninth bit is 1 or 0, if its Set then -256 with current mouse position x, otherwise -0; Same for Y.
     signed dx = (int)mouse_packet[1] - ((flags & 0x10) ? 256 : 0);
     signed dy = (int)mouse_packet[2] - ((flags & 0x20) ? 256 : 0);
+
+    if (graphics_mouse) {
+        mouse_graphics_event(dx, dy, left_btn);
+        return;
+    }
 
     /* Skip movement on an axis that overflowed, but still handle clicks. */
     if (!(flags & 0x40))

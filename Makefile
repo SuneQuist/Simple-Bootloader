@@ -14,7 +14,9 @@ C_OBJECTS = kernel.o filesystem/fs.o shell/shell.o \
             peripherals/mouse.o console/tty.o shell/login.o \
             peripherals/vmmouse.o bin/basic.o networking/netcard.o \
 			networking/net.o networking/e1000.o networking/net_route.o \
-			networking/timer.o networking/http.o
+			networking/timer.o networking/http.o ux/framebuffer.o \
+			ux/desktop.o ux/font.o ux/cursor.o peripherals/interrupts.o \
+			peripherals/irq12.o
 include account/account.mk
 CPPFLAGS += -Ifilesystem -Ishell -Iconsole -Ikeyboard -Imouse
 

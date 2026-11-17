@@ -17,5 +17,7 @@ enum {
 void keyboard_init(void);
 signed keyboard_enable_mouse(void);
 signed keyboard_getc(void);
+void keyboard_irq_scancode(unsigned char code);
+int keyboard_try_getc(void);
 
 #endif

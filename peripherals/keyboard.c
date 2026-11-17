@@ -34,28 +34,67 @@ static const unsigned char extended_keys[128] = {
     [0x53] = KEY_DELETE
 };
 
-
 static unsigned char inb(unsigned short port) {
     unsigned char value;
-    __asm__ volatile ("inb %1, %0" : "=a"(value) : "Nd"(port));
+    __asm volatile ("inb %1, %0" : "=a"(value) : "Nd"(port));
     return value;
 }
 
 static signed ps2_write(unsigned short port, unsigned char value) {
     for (unsigned i = 0; i < 100000; ++i) {
         if (!(inb(0x64) & 0x02)) {
-            __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
+            __asm volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
             return 1;
         }
     }
     return 0;
 }
 
+#define KEYBOARD_QUEUE_SIZE 256u
+#define KEYBOARD_QUEUE_MASK (KEYBOARD_QUEUE_SIZE - 1u)
+
+static volatile unsigned char scancode_queue[KEYBOARD_QUEUE_SIZE];
+static volatile unsigned scancode_head = 0;
+static volatile unsigned scancode_tail = 0;
+static volatile unsigned keyboard_overflows = 0;
+
+void keyboard_irq_scancode(unsigned char code)
+{
+    unsigned next = (scancode_head + 1u) & KEYBOARD_QUEUE_MASK;
+
+    if (next == scancode_tail) {
+        keyboard_overflows++;
+        return;
+    }
+
+    scancode_queue[scancode_head] = code;
+    scancode_head = next;
+}
+
+static int keyboard_pop_scancode(void)
+{
+    unsigned tail = scancode_tail;
+
+    if (tail == scancode_head)
+        return -1;
+
+    unsigned char code = scancode_queue[tail];
+
+    scancode_tail = (tail + 1u) & KEYBOARD_QUEUE_MASK;
+
+    return code;
+}
+
 static int absolute_mouse;
 static unsigned shifts, caps, caps_down, e0_pending, skip;
-void keyboard_init(void) {
+void keyboard_init(void)
+{
     absolute_mouse = 0;
     shifts = caps = caps_down = e0_pending = skip = 0;
+
+    scancode_head = 0;
+    scancode_tail = 0;
+    keyboard_overflows = 0;
 }
 
 signed keyboard_enable_mouse(void) {
@@ -74,6 +113,35 @@ signed keyboard_enable_mouse(void) {
         unsigned char byte = inb(0x60);
         if ((status & 0xE0) == 0x20) {
             if (byte != 0xFA)
+                return 0;
+
+            /* Read the PS/2 controller configuration byte. */
+            if (!ps2_write(0x64, 0x20))
+                return 0;
+
+            unsigned config = 0;
+            int got_config = 0;
+
+            for (unsigned i = 0; i < 100000; ++i) {
+                if (inb(0x64) & 0x01) {
+                    config = inb(0x60);
+                    got_config = 1;
+                    break;
+                }
+            }
+
+            if (!got_config)
+                return 0;
+
+            /* Enable IRQ12 and enable the second PS/2 clock. */
+            config |= 0x02;
+            config &= ~0x20;
+
+            /* Write the configuration byte back. */
+            if (!ps2_write(0x64, 0x60))
+                return 0;
+
+            if (!ps2_write(0x60, config))
                 return 0;
 
             absolute_mouse = vmmouse_init();
@@ -114,83 +182,109 @@ signed keyboard_enable_mouse(void) {
 * shifts &= ~1, ~(tilde) means NOT and flips all bits.
 * So again shifts &= ~1; 0000 0001 & 1111 1110 = 0000 0000 (Shifts = 0 -> Left Shift cleared) 
 */
+/*
+ * Decode one scan code.
+ *
+ * Returns:
+ *   -1 = no complete key event
+ *  >=0 = decoded character or special key
+ */
+static int keyboard_decode(unsigned char code)
+{
+    if (skip) {
+        --skip;
+        return -1;
+    }
 
-signed keyboard_getc(void) {
-    for (;;) {
-        unsigned status = inb(0x64);
-        if (!(status & 0x01))
-            continue;
+    if (code == 0xE1) {
+        e0_pending = 0;
+        skip = 5;  /* Remaining Pause sequence bytes. */
+        return -1;
+    }
 
-        unsigned char code = inb(0x60);
-        if (status & 0xC0)
-            continue;  /* Parity or timeout error. */
+    if (code == 0xE0) {
+        e0_pending = 1;
+        return -1;
+    }
 
-        if (status & 0x20) {
-            if (absolute_mouse) {
-                /* The PS/2 byte is a notification. Read coordinates from VMPort. */
-                if (vmmouse_poll(mouse_absolute_event) < 0) {
-                    absolute_mouse = 0;
-                    mouse_reset_packet();
-                }
-            } else {
-                handle_mouse(code);
-            }
+    unsigned key = code & 0x7F;
+    int released = (code & 0x80) != 0;
 
-            continue;
-        }
+    if (e0_pending) {
+        e0_pending = 0;
 
-        if (skip) {
-            --skip;
-            continue;
-        }
+        if (!released && extended_keys[key])
+            return extended_keys[key];
 
-        if (code == 0xE1) {
-            e0_pending = 0;
-            skip = 5;  /* Skip the remaining bytes of Pause. */
-            continue;
-        }
+        return -1;
+    }
 
-        if (code == 0xE0) {
-            e0_pending = 1;
-            continue;
-        }
-
-        unsigned key = code & 0x7F;
-        int released = (code & 0x80) != 0;
-
-        if (e0_pending) {
-            e0_pending = 0;
-            if (!released && extended_keys[key])
-                return extended_keys[key];
-            continue;
-        }
-
-        if (key == 0x2A || key == 0x36) {
-            unsigned bit = key == 0x2A ? 1u : 2u;
-            if (released)
-                shifts &= ~bit;
-            else
-                shifts |= bit;
-            continue;
-        }
-
-        if (key == 0x3A) {
-            if (!released && !caps_down)
-                caps ^= 1u;
-            caps_down = !released;
-            continue;
-        }
+    if (key == 0x2A || key == 0x36) {
+        unsigned bit = key == 0x2A ? 1u : 2u;
 
         if (released)
-            continue;
+            shifts &= ~bit;
+        else
+            shifts |= bit;
 
-        char c = plain[key];
-        if (!c)
-            continue;
+        return -1;
+    }
 
-        if (c >= 'a' && c <= 'z')
-            return ((shifts != 0) ^ caps) ? c - 'a' + 'A' : c;
+    if (key == 0x3A) {
+        if (!released && !caps_down)
+            caps ^= 1u;
 
-        return (shifts && shifted[key]) ? shifted[key] : c;
+        caps_down = !released;
+        return -1;
+    }
+
+    if (released)
+        return -1;
+
+    char c = plain[key];
+
+    if (!c)
+        return -1;
+
+    if (c >= 'a' && c <= 'z')
+        return ((shifts != 0) ^ caps)
+            ? c - 'a' + 'A'
+            : c;
+
+    return (shifts && shifted[key])
+        ? shifted[key]
+        : c;
+}
+
+/*
+ * Nonblocking: returns -1 if no decoded key is ready.
+ */
+int keyboard_try_getc(void)
+{
+    for (;;) {
+        int code = keyboard_pop_scancode();
+
+        if (code < 0)
+            return -1;
+
+        int key = keyboard_decode((unsigned char)code);
+
+        if (key >= 0)
+            return key;
+    }
+}
+
+/*
+ * Blocking keyboard input, compatible with your shell.
+ */
+signed keyboard_getc(void)
+{
+    for (;;) {
+        int key = keyboard_try_getc();
+
+        if (key >= 0)
+            return key;
+
+        __asm volatile ("pause");
     }
 }
