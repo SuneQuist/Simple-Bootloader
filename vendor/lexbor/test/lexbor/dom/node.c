@@ -1,0 +1,1019 @@
+/*
+ * Copyright (C) 2025 Alexander Borisov
+ *
+ * Author: Alexander Borisov <borisov@lexbor.com>
+ */
+
+#include <unit/test.h>
+
+#include <lexbor/html/html.h>
+#include <lexbor/dom/interfaces/cdata_section.h>
+
+
+typedef struct {
+    const lexbor_str_t str;
+    bool               is_null;
+}
+test_id_data_t;
+
+
+static const lexbor_str_t html = lexbor_str("<div id='div-1'></div>"
+                                            "<div id='div-2'></div>");
+
+static lxb_dom_node_t *test_inserted[8];
+static size_t         test_inserted_length;
+
+
+static lxb_status_t
+test_inserted_cb(lxb_dom_node_t *node)
+{
+    if (test_inserted_length < sizeof(test_inserted) / sizeof(*test_inserted)) {
+        test_inserted[test_inserted_length] = node;
+    }
+
+    test_inserted_length++;
+
+    return LXB_STATUS_OK;
+}
+
+static const lxb_dom_document_mutation_cb_t test_mutation = {
+    .inserted = test_inserted_cb
+};
+
+
+TEST_BEGIN(insert_before)
+{
+    lexbor_status_t status;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+    lexbor_str_t str;
+    lxb_dom_node_t *body;
+    lxb_html_element_t *p_el;
+    lxb_html_body_element_t *element;
+
+    static const lexbor_str_t p_str = lexbor_str("p");
+    static const lexbor_str_t result = lexbor_str("<div id=\"div-1\"></div>"
+                                                  "<p></p>"
+                                                  "<div id=\"div-2\"></div>");
+
+    /* Create HTML Document. */
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    element = lxb_html_document_body_element(document);
+    body = lxb_dom_interface_node(element);
+
+    /* Create <p> Element. */
+
+    p_el = lxb_html_document_create_element(document, p_str.data,
+                                            p_str.length, NULL);
+    test_ne(p_el, NULL);
+
+    /* Insert. */
+
+    code = lxb_dom_node_insert_before_spec(body, lxb_dom_interface_node(p_el),
+                                           body->first_child->next);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    /* Check. */
+
+    str.data = NULL;
+    str.length = 0;
+
+    status = lxb_html_serialize_deep_str(body, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq_str_n(str.data, str.length, result.data, result.length);
+
+    /* Destroy all. */
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(append_child)
+{
+    lexbor_status_t status;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+    lexbor_str_t str;
+    lxb_dom_node_t *body;
+    lxb_html_element_t *p_el;
+    lxb_html_body_element_t *element;
+
+    static const lexbor_str_t p_str = lexbor_str("p");
+    static const lexbor_str_t result = lexbor_str("<div id=\"div-1\"></div>"
+                                                  "<div id=\"div-2\"></div>"
+                                                  "<p></p>");
+
+    /* Create HTML Document. */
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    element = lxb_html_document_body_element(document);
+    body = lxb_dom_interface_node(element);
+
+    /* Create <p> Element. */
+
+    p_el = lxb_html_document_create_element(document, p_str.data,
+                                            p_str.length, NULL);
+    test_ne(p_el, NULL);
+
+    /* Append. */
+
+    code = lxb_dom_node_append_child(body, lxb_dom_interface_node(p_el));
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    /* Check. */
+
+    str.data = NULL;
+    str.length = 0;
+
+    status = lxb_html_serialize_deep_str(body, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq_str_n(str.data, str.length, result.data, result.length);
+
+    /* Destroy all. */
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(append_child_document_fragment)
+{
+    lexbor_status_t status;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+    lexbor_str_t str;
+    lxb_dom_node_t *body, *frag_node;
+    lxb_dom_document_t *dom_doc;
+    lxb_html_element_t *p_el, *a_el;
+    lxb_html_body_element_t *element;
+    lxb_dom_document_fragment_t *fragment;
+
+    static const lexbor_str_t p_str = lexbor_str("p");
+    static const lexbor_str_t a_str = lexbor_str("a");
+    static const lexbor_str_t result = lexbor_str("<div id=\"div-1\"></div>"
+                                                  "<div id=\"div-2\"></div>"
+                                                  "<p></p><a></a>");
+
+    /* Create HTML Document. */
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    element = lxb_html_document_body_element(document);
+    body = lxb_dom_interface_node(element);
+
+    /* Create DocumentFragment. */
+
+    dom_doc = lxb_dom_interface_document(document);
+
+    fragment = lxb_dom_document_fragment_interface_create(dom_doc);
+    test_ne(fragment, NULL);
+
+    /* Create <p> and <a> Element. */
+
+    frag_node = lxb_dom_interface_node(fragment);
+
+    p_el = lxb_html_document_create_element(document, p_str.data,
+                                            p_str.length, NULL);
+    test_ne(p_el, NULL);
+
+    a_el = lxb_html_document_create_element(document, a_str.data,
+                                            a_str.length, NULL);
+    test_ne(a_el, NULL);
+
+    code = lxb_dom_node_append_child(frag_node, lxb_dom_interface_node(p_el));
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    code = lxb_dom_node_append_child(frag_node, lxb_dom_interface_node(a_el));
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    /* Append DocumentFragment. */
+
+    code = lxb_dom_node_append_child(body, frag_node);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    /* Check. */
+
+    str.data = NULL;
+    str.length = 0;
+
+    status = lxb_html_serialize_deep_str(body, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq_str_n(str.data, str.length, result.data, result.length);
+
+    /* Destroy all. */
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(append_child_attribute)
+{
+    lxb_status_t status;
+    lxb_dom_attr_t *attr;
+    lxb_dom_node_t *body, *div;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    body = lxb_dom_interface_node(lxb_html_document_body_element(document));
+    div = body->first_child;
+
+    attr = lxb_dom_element_first_attribute(lxb_dom_interface_element(div));
+    test_ne(attr, NULL);
+
+    code = lxb_dom_node_append_child(body, lxb_dom_interface_node(attr));
+    test_eq(code, LXB_DOM_EXCEPTION_HIERARCHY_REQUEST_ERR);
+
+    code = lxb_dom_node_append_child(div, lxb_dom_interface_node(attr));
+    test_eq(code, LXB_DOM_EXCEPTION_HIERARCHY_REQUEST_ERR);
+
+    test_eq(lxb_dom_interface_node(attr)->parent, NULL);
+    test_eq(div->first_child, NULL);
+    test_eq(body->last_child, div->next);
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(append_child_document)
+{
+    lxb_status_t status;
+    lxb_dom_node_t *body, *node;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document, *other;
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    other = lxb_html_document_create();
+    test_ne(other, NULL);
+
+    status = lxb_html_document_parse(other, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    body = lxb_dom_interface_node(lxb_html_document_body_element(document));
+    node = lxb_dom_interface_node(other);
+
+    code = lxb_dom_node_append_child(body, node);
+    test_eq(code, LXB_DOM_EXCEPTION_HIERARCHY_REQUEST_ERR);
+
+    code = lxb_dom_node_insert_before_spec(body, node, body->first_child);
+    test_eq(code, LXB_DOM_EXCEPTION_HIERARCHY_REQUEST_ERR);
+
+    code = lxb_dom_node_replace_child(body, node, body->first_child);
+    test_eq(code, LXB_DOM_EXCEPTION_HIERARCHY_REQUEST_ERR);
+
+    test_eq(node->parent, NULL);
+    test_eq(body->first_child->next, body->last_child);
+
+    lxb_html_document_destroy(other);
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(append_child_character_data)
+{
+    lxb_status_t status;
+    lxb_dom_node_t *body, *doc_node, *frag_node;
+    lxb_dom_comment_t *comment;
+    lxb_dom_document_t *dom_doc;
+    lxb_dom_cdata_section_t *cdata;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+    lxb_dom_document_fragment_t *fragment;
+    lxb_dom_processing_instruction_t *pi;
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    dom_doc = lxb_dom_interface_document(document);
+    doc_node = lxb_dom_interface_node(document);
+    body = lxb_dom_interface_node(lxb_html_document_body_element(document));
+
+    comment = lxb_dom_document_create_comment(dom_doc,
+                                              (const lxb_char_t *) "c", 1);
+    test_ne(comment, NULL);
+
+    pi = lxb_dom_document_create_processing_instruction(dom_doc,
+                                              (const lxb_char_t *) "t", 1,
+                                              (const lxb_char_t *) "d", 1);
+    test_ne(pi, NULL);
+
+    cdata = lxb_dom_cdata_section_interface_create(dom_doc);
+    test_ne(cdata, NULL);
+
+    code = lxb_dom_node_append_child(body, lxb_dom_interface_node(comment));
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+    test_eq(body->last_child, lxb_dom_interface_node(comment));
+
+    code = lxb_dom_node_append_child(doc_node, lxb_dom_interface_node(pi));
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+    test_eq(doc_node->last_child, lxb_dom_interface_node(pi));
+
+    code = lxb_dom_node_append_child(doc_node, lxb_dom_interface_node(cdata));
+    test_eq(code, LXB_DOM_EXCEPTION_HIERARCHY_REQUEST_ERR);
+    test_eq(lxb_dom_interface_node(cdata)->parent, NULL);
+
+    fragment = lxb_dom_document_fragment_interface_create(dom_doc);
+    test_ne(fragment, NULL);
+
+    frag_node = lxb_dom_interface_node(fragment);
+
+    code = lxb_dom_node_append_child(frag_node, lxb_dom_interface_node(cdata));
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    code = lxb_dom_node_append_child(doc_node, frag_node);
+    test_eq(code, LXB_DOM_EXCEPTION_HIERARCHY_REQUEST_ERR);
+    test_eq(lxb_dom_interface_node(cdata)->parent, frag_node);
+
+    code = lxb_dom_node_append_child(body, frag_node);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+    test_eq(body->last_child, lxb_dom_interface_node(cdata));
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(replace_child)
+{
+    lexbor_status_t status;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+    lexbor_str_t str;
+    lxb_dom_node_t *body;
+    lxb_html_element_t *p_el;
+    lxb_html_body_element_t *element;
+
+    static const lexbor_str_t p_str = lexbor_str("p");
+    static const lexbor_str_t result = lexbor_str("<p></p>"
+                                                  "<div id=\"div-2\"></div>");
+
+    /* Create HTML Document. */
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    element = lxb_html_document_body_element(document);
+    body = lxb_dom_interface_node(element);
+
+    /* Create <p> Element. */
+
+    p_el = lxb_html_document_create_element(document, p_str.data,
+                                            p_str.length, NULL);
+    test_ne(p_el, NULL);
+
+    /* Replace. */
+
+    code = lxb_dom_node_replace_child(body, lxb_dom_interface_node(p_el),
+                                      body->first_child);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    /* Check. */
+
+    str.data = NULL;
+    str.length = 0;
+
+    status = lxb_html_serialize_deep_str(body, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq_str_n(str.data, str.length, result.data, result.length);
+
+    /* Destroy all. */
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(replace_child_document_fragment)
+{
+    lexbor_status_t status;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+    lexbor_str_t str;
+    lxb_dom_node_t *body, *frag_node;
+    lxb_dom_document_t *dom_doc;
+    lxb_html_element_t *p_el, *a_el;
+    lxb_html_body_element_t *element;
+    lxb_dom_document_fragment_t *fragment;
+
+    static const lexbor_str_t p_str = lexbor_str("p");
+    static const lexbor_str_t a_str = lexbor_str("a");
+    static const lexbor_str_t result = lexbor_str("<p></p><a></a>"
+                                                  "<div id=\"div-2\"></div>");
+
+    /* Create HTML Document. */
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    element = lxb_html_document_body_element(document);
+    body = lxb_dom_interface_node(element);
+
+    /* Create DocumentFragment. */
+
+    dom_doc = lxb_dom_interface_document(document);
+
+    fragment = lxb_dom_document_fragment_interface_create(dom_doc);
+    test_ne(fragment, NULL);
+
+    /* Create <p> and <a> Element. */
+
+    frag_node = lxb_dom_interface_node(fragment);
+
+    p_el = lxb_html_document_create_element(document, p_str.data,
+                                            p_str.length, NULL);
+    test_ne(p_el, NULL);
+
+    a_el = lxb_html_document_create_element(document, a_str.data,
+                                            a_str.length, NULL);
+    test_ne(a_el, NULL);
+
+    code = lxb_dom_node_append_child(frag_node, lxb_dom_interface_node(p_el));
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    code = lxb_dom_node_append_child(frag_node, lxb_dom_interface_node(a_el));
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    /* Replace by DocumentFragment. */
+
+    code = lxb_dom_node_replace_child(body, frag_node, body->first_child);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    /* Check. */
+
+    str.data = NULL;
+    str.length = 0;
+
+    status = lxb_html_serialize_deep_str(body, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq_str_n(str.data, str.length, result.data, result.length);
+
+    /* Destroy all. */
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN_ARGS(replace_child_by_id, const char *node_id,
+                const char *child_id, const char *result)
+{
+    lexbor_str_t str = {0};
+    lxb_status_t status;
+    lxb_dom_node_t *body, *node, *child;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+
+    static const lexbor_str_t data = lexbor_str("<i id=a></i><i id=b></i>"
+                                                "<i id=c></i>");
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, data.data, data.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    body = lxb_dom_interface_node(lxb_html_document_body_element(document));
+
+    child = lxb_dom_node_by_id(body, (const lxb_char_t *) child_id,
+                               strlen(child_id));
+    test_ne(child, NULL);
+
+    if (node_id != NULL) {
+        node = lxb_dom_node_by_id(body, (const lxb_char_t *) node_id,
+                                  strlen(node_id));
+    }
+    else {
+        node = lxb_dom_interface_node(lxb_html_document_create_element(document,
+                                                 (const lxb_char_t *) "p", 1,
+                                                 NULL));
+    }
+
+    test_ne(node, NULL);
+
+    code = lxb_dom_node_replace_child(body, node, child);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    test_eq(node->parent, body);
+
+    if (child != node) {
+        test_eq(child->parent, NULL);
+    }
+
+    status = lxb_html_serialize_deep_str(body, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq_str(str.data, result);
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(replace_child_middle)
+{
+    TEST_CALL_ARGS(replace_child_by_id, NULL, "b",
+                   "<i id=\"a\"></i><p></p><i id=\"c\"></i>");
+}
+TEST_END
+
+TEST_BEGIN(replace_child_last)
+{
+    TEST_CALL_ARGS(replace_child_by_id, NULL, "c",
+                   "<i id=\"a\"></i><i id=\"b\"></i><p></p>");
+}
+TEST_END
+
+TEST_BEGIN(replace_child_with_itself)
+{
+    TEST_CALL_ARGS(replace_child_by_id, "b", "b",
+                   "<i id=\"a\"></i><i id=\"b\"></i><i id=\"c\"></i>");
+}
+TEST_END
+
+TEST_BEGIN(replace_child_with_next_sibling)
+{
+    TEST_CALL_ARGS(replace_child_by_id, "b", "a",
+                   "<i id=\"b\"></i><i id=\"c\"></i>");
+}
+TEST_END
+
+TEST_BEGIN(replace_child_with_previous_sibling)
+{
+    TEST_CALL_ARGS(replace_child_by_id, "a", "b",
+                   "<i id=\"a\"></i><i id=\"c\"></i>");
+}
+TEST_END
+
+TEST_BEGIN(replace_child_with_last_sibling)
+{
+    TEST_CALL_ARGS(replace_child_by_id, "c", "a",
+                   "<i id=\"c\"></i><i id=\"b\"></i>");
+}
+TEST_END
+
+TEST_BEGIN(replace_child_middle_document_fragment)
+{
+    lexbor_str_t str = {0};
+    lxb_status_t status;
+    lxb_dom_node_t *body, *frag_node;
+    lxb_dom_document_t *dom_doc;
+    lxb_html_element_t *p_el, *a_el;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+    lxb_dom_document_fragment_t *fragment;
+
+    static const lexbor_str_t data = lexbor_str("<i></i><b></b><s></s>");
+    static const lexbor_str_t result = lexbor_str("<i></i><p></p><a></a>"
+                                                  "<s></s>");
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, data.data, data.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    body = lxb_dom_interface_node(lxb_html_document_body_element(document));
+
+    dom_doc = lxb_dom_interface_document(document);
+
+    fragment = lxb_dom_document_fragment_interface_create(dom_doc);
+    test_ne(fragment, NULL);
+
+    frag_node = lxb_dom_interface_node(fragment);
+
+    p_el = lxb_html_document_create_element(document,
+                                            (const lxb_char_t *) "p", 1, NULL);
+    test_ne(p_el, NULL);
+
+    a_el = lxb_html_document_create_element(document,
+                                            (const lxb_char_t *) "a", 1, NULL);
+    test_ne(a_el, NULL);
+
+    code = lxb_dom_node_append_child(frag_node, lxb_dom_interface_node(p_el));
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    code = lxb_dom_node_append_child(frag_node, lxb_dom_interface_node(a_el));
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    code = lxb_dom_node_replace_child(body, frag_node, body->first_child->next);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    test_eq(frag_node->first_child, NULL);
+
+    status = lxb_html_serialize_deep_str(body, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq_str_n(str.data, str.length, result.data, result.length);
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(remove_child)
+{
+    lexbor_status_t status;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+    lexbor_str_t str;
+    lxb_dom_node_t *body;
+    lxb_html_body_element_t *element;
+
+    static const lexbor_str_t result = lexbor_str("<div id=\"div-2\"></div>");
+
+    /* Create HTML Document. */
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    element = lxb_html_document_body_element(document);
+    body = lxb_dom_interface_node(element);
+
+    /* Replace. */
+
+    code = lxb_dom_node_remove_child(body, body->first_child);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    /* Check. */
+
+    str.data = NULL;
+    str.length = 0;
+
+    status = lxb_html_serialize_deep_str(body, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq_str_n(str.data, str.length, result.data, result.length);
+
+    /* Destroy all. */
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN_ARGS(replace_all_with, const char *data, const char *id,
+                const char *result)
+{
+    lexbor_str_t str = {0};
+    lxb_status_t status;
+    lxb_dom_node_t *body, *parent, *node;
+    lxb_html_document_t *document;
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, (const lxb_char_t *) data,
+                                     strlen(data));
+    test_eq(status, LXB_STATUS_OK);
+
+    body = lxb_dom_interface_node(lxb_html_document_body_element(document));
+    parent = body->first_child;
+
+    node = lxb_dom_node_by_id(body, (const lxb_char_t *) id, strlen(id));
+    test_ne(node, NULL);
+
+    status = lxb_dom_node_replace_all(parent, node);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq(node->parent, parent);
+    test_eq(node->prev, NULL);
+    test_eq(node->next, NULL);
+    test_eq(parent->first_child, node);
+    test_eq(parent->last_child, node);
+
+    status = lxb_html_serialize_deep_str(body, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq_str(str.data, result);
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(replace_all_with_child)
+{
+    TEST_CALL_ARGS(replace_all_with,
+                   "<div><i>a</i><span id=n>b<b>c</b></span><i>d</i></div>"
+                   "<p>e</p>",
+                   "n",
+                   "<div><span id=\"n\">b<b>c</b></span></div><p>e</p>");
+}
+TEST_END
+
+TEST_BEGIN(replace_all_with_descendant)
+{
+    TEST_CALL_ARGS(replace_all_with,
+                   "<div><i>a</i><p>b<span id=n>c<b>d</b></span>e</p></div>"
+                   "<p>f</p>",
+                   "n",
+                   "<div><span id=\"n\">c<b>d</b></span></div><p>f</p>");
+}
+TEST_END
+
+TEST_BEGIN(replace_all_with_child_of_other)
+{
+    lexbor_str_t str = {0};
+    lxb_status_t status;
+    lxb_dom_node_t *body, *div, *p, *span;
+    lxb_html_document_t *document;
+
+    static const lexbor_str_t data = lexbor_str("<div><i>a</i></div>"
+                                                "<p>b<span>c</span>d</p>");
+
+    static const lexbor_str_t result = lexbor_str("<div><span>c</span></div>"
+                                                  "<p>bd</p>");
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, data.data, data.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    body = lxb_dom_interface_node(lxb_html_document_body_element(document));
+    div = body->first_child;
+    p = div->next;
+    span = p->first_child->next;
+
+    status = lxb_dom_node_replace_all(div, span);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq(span->parent, div);
+    test_eq(div->first_child, span);
+    test_eq(div->last_child, span);
+
+    test_eq(p->first_child->next, p->last_child);
+    test_eq(p->last_child->prev, p->first_child);
+
+    status = lxb_html_serialize_deep_str(body, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq_str_n(str.data, str.length, result.data, result.length);
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(text_content_set_empty)
+{
+    lxb_status_t status;
+    lxb_dom_node_t *body, *div, *frag_node;
+    lxb_dom_document_t *dom_doc;
+    lxb_dom_exception_code_t code;
+    lxb_dom_character_data_t *ch_data;
+    lxb_html_document_t *document;
+    lxb_dom_document_fragment_t *fragment;
+
+    static const lexbor_str_t data = lexbor_str("<div><b>a</b>b</div><p>c</p>");
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, data.data, data.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    body = lxb_dom_interface_node(lxb_html_document_body_element(document));
+    div = body->first_child;
+
+    status = lxb_dom_node_text_content_set(div, (const lxb_char_t *) "", 0);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq(div->first_child, NULL);
+    test_eq(div->last_child, NULL);
+
+    status = lxb_dom_node_text_content_set(div, (const lxb_char_t *) "d", 1);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(div->first_child, NULL);
+    test_eq(div->first_child, div->last_child);
+    test_eq(div->first_child->type, LXB_DOM_NODE_TYPE_TEXT);
+
+    ch_data = lxb_dom_interface_character_data(div->first_child);
+    test_eq_str_n(ch_data->data.data, ch_data->data.length, "d", 1);
+
+    dom_doc = lxb_dom_interface_document(document);
+
+    fragment = lxb_dom_document_fragment_interface_create(dom_doc);
+    test_ne(fragment, NULL);
+
+    frag_node = lxb_dom_interface_node(fragment);
+
+    code = lxb_dom_node_append_child(frag_node, div->next);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    test_eq(body->last_child, div);
+    test_ne(frag_node->first_child, NULL);
+
+    status = lxb_dom_node_text_content_set(frag_node,
+                                           (const lxb_char_t *) "", 0);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_eq(frag_node->first_child, NULL);
+    test_eq(frag_node->last_child, NULL);
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(insertion_steps)
+{
+    lxb_status_t status;
+    lxb_dom_node_t *body, *p, *b, *a, *i, *frag_node;
+    lxb_dom_document_t *dom_doc;
+    lxb_dom_exception_code_t code;
+    lxb_html_document_t *document;
+    lxb_dom_document_fragment_t *fragment;
+    const lxb_dom_document_mutation_cb_t *mutation;
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html.data, html.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    dom_doc = lxb_dom_interface_document(document);
+    body = lxb_dom_interface_node(lxb_html_document_body_element(document));
+
+    p = lxb_dom_interface_node(lxb_html_document_create_element(document,
+                                         (const lxb_char_t *) "p", 1, NULL));
+    test_ne(p, NULL);
+
+    b = lxb_dom_interface_node(lxb_html_document_create_element(document,
+                                         (const lxb_char_t *) "b", 1, NULL));
+    test_ne(b, NULL);
+
+    a = lxb_dom_interface_node(lxb_html_document_create_element(document,
+                                         (const lxb_char_t *) "a", 1, NULL));
+    test_ne(a, NULL);
+
+    i = lxb_dom_interface_node(lxb_html_document_create_element(document,
+                                         (const lxb_char_t *) "i", 1, NULL));
+    test_ne(i, NULL);
+
+    fragment = lxb_dom_document_fragment_interface_create(dom_doc);
+    test_ne(fragment, NULL);
+
+    frag_node = lxb_dom_interface_node(fragment);
+
+    lxb_dom_node_insert_child_wo_events(p, b);
+
+    mutation = dom_doc->mutation;
+    dom_doc->mutation = &test_mutation;
+
+    test_inserted_length = 0;
+
+    code = lxb_dom_node_append_child(body, p);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    test_eq_size(test_inserted_length, 2);
+    test_eq(test_inserted[0], p);
+    test_eq(test_inserted[1], b);
+
+    test_inserted_length = 0;
+
+    code = lxb_dom_node_insert_before_spec(body, a, p);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    test_eq_size(test_inserted_length, 1);
+    test_eq(test_inserted[0], a);
+
+    test_inserted_length = 0;
+
+    code = lxb_dom_node_replace_child(body, i, a);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    test_eq_size(test_inserted_length, 1);
+    test_eq(test_inserted[0], i);
+
+    lxb_dom_node_insert_child_wo_events(frag_node, a);
+
+    test_inserted_length = 0;
+
+    code = lxb_dom_node_append_child(body, frag_node);
+    test_eq(code, LXB_DOM_EXCEPTION_OK);
+
+    test_eq_size(test_inserted_length, 1);
+    test_eq(test_inserted[0], a);
+
+    dom_doc->mutation = mutation;
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+TEST_BEGIN(get_by_id)
+{
+    size_t len;
+    lexbor_status_t status;
+    lxb_html_document_t *document;
+    lxb_dom_node_t *body, *node;
+    lxb_html_body_element_t *element;
+
+    static const lexbor_str_t html_str = lexbor_str("<div id='idDIV'></div>");
+    static const test_id_data_t id_data[] =
+    {
+        {lexbor_str("idDIV"), false},
+        {lexbor_str(" idDIV"), true},
+        {lexbor_str("idDIV "), true},
+        {lexbor_str(" dDIV"), true},
+        {lexbor_str("idDI "), true},
+        {lexbor_str("iddiv"), true}
+    };
+
+    /* Create HTML Document. */
+
+    document = lxb_html_document_create();
+    test_ne(document, NULL);
+
+    status = lxb_html_document_parse(document, html_str.data, html_str.length);
+    test_eq(status, LXB_STATUS_OK);
+
+    element = lxb_html_document_body_element(document);
+    body = lxb_dom_interface_node(element);
+
+    /* Find. */
+
+    len = sizeof(id_data) / sizeof(test_id_data_t);
+
+    for (size_t i = 0; i < len; i++) {
+        node = lxb_dom_node_by_id(body,
+                                  id_data[i].str.data, id_data[i].str.length);
+        if (id_data[i].is_null) {
+            test_eq(node, NULL);
+        }
+        else {
+            test_eq(node, body->first_child);
+        }
+    }
+
+    /* Destroy all. */
+
+    lxb_html_document_destroy(document);
+}
+TEST_END
+
+int
+main(int argc, const char * argv[])
+{
+    TEST_INIT();
+
+    TEST_ADD(insert_before);
+    TEST_ADD(append_child);
+    TEST_ADD(append_child_document_fragment);
+    TEST_ADD(append_child_attribute);
+    TEST_ADD(append_child_document);
+    TEST_ADD(append_child_character_data);
+    TEST_ADD(replace_child);
+    TEST_ADD(replace_child_document_fragment);
+    TEST_ADD(replace_child_middle);
+    TEST_ADD(replace_child_last);
+    TEST_ADD(replace_child_with_itself);
+    TEST_ADD(replace_child_with_next_sibling);
+    TEST_ADD(replace_child_with_previous_sibling);
+    TEST_ADD(replace_child_with_last_sibling);
+    TEST_ADD(replace_child_middle_document_fragment);
+    TEST_ADD(remove_child);
+    TEST_ADD(replace_all_with_child);
+    TEST_ADD(replace_all_with_descendant);
+    TEST_ADD(replace_all_with_child_of_other);
+    TEST_ADD(text_content_set_empty);
+    TEST_ADD(insertion_steps);
+    TEST_ADD(get_by_id);
+
+    TEST_RUN("lexbor/dom/node");
+    TEST_RELEASE();
+}

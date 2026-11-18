@@ -1,0 +1,69 @@
+[
+    /* Test count: 7 */
+    /* 1 */
+    {
+        "url": "file://C|/my/docs",
+        "done": "file:///C:/my/docs",
+        "scheme": "file",
+        "host": "",
+        "path": "/C:/my/docs",
+        "failed": false,
+        "encoding": "utf-8"
+    },
+    /* 2 */
+    {
+        "url": "file://CdiSk/my/docs",
+        "done": "file://cdisk/my/docs",
+        "scheme": "file",
+        "host": "cdisk",
+        "path": "/my/docs",
+        "failed": false,
+        "encoding": "utf-8"
+    },
+    /* 3 */
+    {
+        "url": "file://C|disk/my/docs",
+        "failed": true,
+        "encoding": "utf-8"
+    },
+    /* 4 */
+    {
+        "url": "file://CDISK%2Ecom/my/docs",
+        "done": "file://cdisk.com/my/docs",
+        "scheme": "file",
+        "host": "cdisk.com",
+        "path": "/my/docs",
+        "failed": false,
+        "encoding": "utf-8"
+    },
+    /* 5 */
+    {
+        "url": "file://LOCAL%48OST/my/docs",
+        "done": "file:///my/docs",
+        "scheme": "file",
+        "host": "",
+        "path": "/my/docs",
+        "failed": false,
+        "encoding": "utf-8"
+    },
+    /* 6 */
+    {
+        "url": "file://xn--a-/my/docs",
+        "done": "file://xn--a-/my/docs",
+        "scheme": "file",
+        "host": "xn--a-",
+        "path": "/my/docs",
+        "failed": false,
+        "encoding": "utf-8"
+    },
+    /* 7 */
+    {
+        "url": "file://xn--/my/docs",
+        "done": "file://xn--/my/docs",
+        "scheme": "file",
+        "host": "xn--",
+        "path": "/my/docs",
+        "failed": false,
+        "encoding": "utf-8"
+    }
+]

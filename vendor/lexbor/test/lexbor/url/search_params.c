@@ -1,0 +1,1108 @@
+/*
+ * Copyright (C) 2025 Alexander Borisov
+ *
+ * Author: Alexander Borisov <borisov@lexbor.com>
+ */
+
+#include <unit/test.h>
+#include <lexbor/url/url.h>
+
+
+typedef struct {
+    lexbor_str_t query;
+    lexbor_str_t result;
+    bool         sort;
+}
+test_params_t;
+
+
+static const test_params_t test_params[] =
+{
+    {
+        .query = lexbor_str(""),
+        .result = lexbor_str(""),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz=789&abc=123"),
+        .result = lexbor_str("xyz=789&abc=123"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz=789&abc=123"),
+        .result = lexbor_str("abc=123&xyz=789"),
+        .sort = true
+    },
+    {
+        .query = lexbor_str("?xyz=789&abc=123"),
+        .result = lexbor_str("xyz=789&abc=123"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz789&abc=123"),
+        .result = lexbor_str("xyz789=&abc=123"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz=&abc=123"),
+        .result = lexbor_str("xyz=&abc=123"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz789abc=123"),
+        .result = lexbor_str("xyz789abc=123"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz"),
+        .result = lexbor_str("xyz="),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz&abc"),
+        .result = lexbor_str("xyz=&abc="),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz&abc"),
+        .result = lexbor_str("abc=&xyz="),
+        .sort = true
+    },
+    {
+        .query = lexbor_str("xyz=789&123=abc"),
+        .result = lexbor_str("123=abc&xyz=789"),
+        .sort = true
+    },
+    {
+        .query = lexbor_str("xyz=7+8+9"),
+        .result = lexbor_str("xyz=7+8+9"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz=7 8 9"),
+        .result = lexbor_str("xyz=7+8+9"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz=спасибо"),
+        .result = lexbor_str("xyz=%D1%81%D0%BF%D0%B0%D1%81%D0%B8%D0%B1%D0%BE"),
+        .sort = false
+    },
+    {
+        .query = {.data = NULL, .length = 0},
+        .result = lexbor_str(""),
+        .sort = true
+    },
+    {
+        .query = lexbor_str("&"),
+        .result = lexbor_str(""),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("?&&"),
+        .result = lexbor_str(""),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("&xyz&&abc&"),
+        .result = lexbor_str("xyz=&abc="),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("xyz=789&&abc=123&"),
+        .result = lexbor_str("xyz=789&abc=123"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("&=&"),
+        .result = lexbor_str("="),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("a%00b=1&a%00a=2&a%00=3&a=4"),
+        .result = lexbor_str("a=4&a%00=3&a%00a=2&a%00b=1"),
+        .sort = true
+    },
+    {
+        .query = lexbor_str("%EF%AC%83=1&%F0%9F%8C%88=2&%EE%80%80=3&z=4"),
+        .result = lexbor_str("z=4&%F0%9F%8C%88=2&%EE%80%80=3&%EF%AC%83=1"),
+        .sort = true
+    },
+    {
+        .query = lexbor_str("%FF=1&xyz=%C3"),
+        .result = lexbor_str("%EF%BF%BD=1&xyz=%EF%BF%BD"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("%E2%82=%E2%82%AC&%F0%9F%98+=%C3%28"),
+        .result = lexbor_str("%EF%BF%BD=%E2%82%AC&%EF%BF%BD+=%EF%BF%BD%28"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("%ED%A0%80=%C0%AF&%F4%90%80%80=%E0%80%80"),
+        .result = lexbor_str("%EF%BF%BD%EF%BF%BD%EF%BF%BD=%EF%BF%BD%EF%BF%BD"
+                             "&%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD"
+                             "=%EF%BF%BD%EF%BF%BD%EF%BF%BD"),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF=\xE2\x82&a\xF0\x9F"),
+        .result = lexbor_str("%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD"
+                             "%EF%BF%BD%EF%BF%BD%EF%BF%BD%EF%BF%BD"
+                             "=%EF%BF%BD&a%EF%BF%BD="),
+        .sort = false
+    },
+    {
+        .query = lexbor_str("a%FFb%E2%82%ACc=%EF%BB%BF%ED%9F%BF%F4%8F%BF%BF"),
+        .result = lexbor_str("a%EF%BF%BDb%E2%82%ACc=%EF%BB%BF%ED%9F%BF%F4%8F%BF%BF"),
+        .sort = false
+    },
+};
+
+static bool test_malloc_fail;
+
+
+static void *
+test_malloc(size_t size)
+{
+    if (test_malloc_fail) {
+        return NULL;
+    }
+
+    return malloc(size);
+}
+
+static lxb_status_t
+serialize_cb(const lxb_char_t *data, size_t len, void *ctx)
+{
+    lexbor_str_t *str = ctx;
+
+    str->length = len;
+    str->data = lexbor_malloc(len + 1);
+    if (str->data == NULL) {
+        return LXB_STATUS_ERROR_MEMORY_ALLOCATION;
+    }
+
+    memcpy(str->data, data, len);
+
+    str->data[len] = '\0';
+
+    return LXB_STATUS_OK;
+}
+
+TEST_BEGIN(params_init)
+{
+    lxb_status_t status;
+    lexbor_str_t str;
+    lexbor_mraw_t *mraw;
+    const test_params_t *param;
+    lxb_url_search_params_t *sp;
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    for (size_t i = 0; i < sizeof(test_params) / sizeof(test_params_t); i++) {
+        param = &test_params[i];
+
+        sp = lxb_url_search_params_init(mraw,
+                                        param->query.data, param->query.length);
+        test_ne(sp, NULL);
+
+        if (param->sort) {
+            lxb_url_search_params_sort(sp);
+        }
+
+        str.data = NULL;
+
+        status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+        test_eq(status, LXB_STATUS_OK);
+
+        if (param->result.data == NULL) {
+            test_ne(str.data, NULL);
+            test_eq_str(str.data, "");
+        }
+        else {
+            test_ne(str.data, NULL);
+            test_eq_str(str.data, param->result.data);
+        }
+
+        str.data = lexbor_free(str.data);
+    }
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_null_init_append)
+{
+    lxb_status_t status;
+    lexbor_str_t str;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+    lxb_url_search_entry_t *entry;
+
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t value = lexbor_str("xyz");
+    static const lexbor_str_t result = lexbor_str("abc=xyz");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, NULL, 0);
+    test_ne(sp, NULL);
+
+    entry = lxb_url_search_params_append(sp, name.data, name.length,
+                                         value.data, value.length);
+    test_ne(entry, NULL);
+
+    status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(str.data, NULL);
+    test_eq_str(str.data, result.data);
+
+    str.data = lexbor_free(str.data);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_append)
+{
+    lxb_status_t status;
+    lexbor_str_t str;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+    lxb_url_search_entry_t *entry;
+
+    static const lexbor_str_t init = lexbor_str("first=last&new=old");
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t value = lexbor_str("xyz");
+    static const lexbor_str_t result = lexbor_str("first=last&new=old&abc=xyz");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    entry = lxb_url_search_params_append(sp, name.data, name.length,
+                                         value.data, value.length);
+    test_ne(entry, NULL);
+
+    status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(str.data, NULL);
+    test_eq_str(str.data, result.data);
+
+    str.data = lexbor_free(str.data);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_init_replacement)
+{
+    size_t i;
+    lxb_char_t *query, *result, *p, *r;
+    lxb_status_t status;
+    lexbor_str_t str;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const size_t amount = 5000;
+    static const lexbor_str_t replacement = lexbor_str("%EF%BF%BD");
+
+    query = lexbor_malloc(amount * 6 + 2);
+    test_ne(query, NULL);
+
+    result = lexbor_malloc(amount * replacement.length * 3 + 3);
+    test_ne(result, NULL);
+
+    p = query;
+    r = result;
+
+    for (i = 0; i < amount; i++) {
+        *p++ = 0xFF;
+
+        memcpy(r, replacement.data, replacement.length);
+        r += replacement.length;
+    }
+
+    *p++ = '=';
+    *r++ = '=';
+
+    for (i = 0; i < amount; i++) {
+        *p++ = 0xE2;
+        *p++ = 0x82;
+
+        memcpy(r, replacement.data, replacement.length);
+        r += replacement.length;
+    }
+
+    *p++ = '&';
+    *r++ = '&';
+
+    for (i = 0; i < amount; i++) {
+        memcpy(p, "%C3", 3);
+        p += 3;
+
+        memcpy(r, replacement.data, replacement.length);
+        r += replacement.length;
+    }
+
+    *r++ = '=';
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, query, p - query);
+    test_ne(sp, NULL);
+
+    test_eq_size(sp->length, 2);
+    test_eq_size(sp->first->name.length, amount * 3);
+    test_eq_size(sp->first->value.length, amount * 3);
+
+    status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(str.data, NULL);
+    test_eq_str_n(str.data, str.length, result, (size_t) (r - result));
+
+    str.data = lexbor_free(str.data);
+
+    lxb_url_search_params_destroy(sp);
+    lexbor_mraw_destroy(mraw, true);
+
+    lexbor_free(result);
+    lexbor_free(query);
+}
+TEST_END
+
+TEST_BEGIN(params_append_after_name)
+{
+    lxb_status_t status;
+    lexbor_str_t str;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+    lxb_url_search_entry_t *entry;
+
+    static const lexbor_str_t inits[] = {
+        lexbor_str("?new"),
+        lexbor_str("first=last&new"),
+        lexbor_str("first&new")
+    };
+
+    static const lexbor_str_t results[] = {
+        lexbor_str("new=&abc=xyz"),
+        lexbor_str("first=last&new=&abc=xyz"),
+        lexbor_str("first=&new=&abc=xyz")
+    };
+
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t value = lexbor_str("xyz");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    for (size_t i = 0; i < sizeof(inits) / sizeof(lexbor_str_t); i++) {
+        sp = lxb_url_search_params_init(mraw, inits[i].data, inits[i].length);
+        test_ne(sp, NULL);
+
+        entry = lxb_url_search_params_append(sp, name.data, name.length,
+                                             value.data, value.length);
+        test_ne(entry, NULL);
+
+        status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+        test_eq(status, LXB_STATUS_OK);
+
+        test_ne(str.data, NULL);
+        test_eq_str(str.data, results[i].data);
+
+        str.data = lexbor_free(str.data);
+
+        lxb_url_search_params_destroy(sp);
+    }
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_delete_name_value)
+{
+    lxb_status_t status;
+    lexbor_str_t str;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const lexbor_str_t init = lexbor_str("first=last&abc=xyz&new=old");
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t value = lexbor_str("xyz");
+    static const lexbor_str_t result = lexbor_str("first=last&new=old");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    lxb_url_search_params_delete(sp, name.data, name.length,
+                                 value.data, value.length);
+
+    status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(str.data, NULL);
+    test_eq_str(str.data, result.data);
+
+    str.data = lexbor_free(str.data);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_delete_name)
+{
+    lxb_status_t status;
+    lexbor_str_t str;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const lexbor_str_t init = lexbor_str("first=last&abc=xyz&new=old");
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t result = lexbor_str("first=last&new=old");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    lxb_url_search_params_delete(sp, name.data, name.length, NULL, 0);
+
+    status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(str.data, NULL);
+    test_eq_str(str.data, result.data);
+
+    str.data = lexbor_free(str.data);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_delete_name_duplicates)
+{
+    lxb_status_t status;
+    lexbor_str_t str;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const lexbor_str_t init = lexbor_str("abc=123&first=last&abc=xyz&new=old");
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t result = lexbor_str("first=last&new=old");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    lxb_url_search_params_delete(sp, name.data, name.length, NULL, 0);
+
+    status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(str.data, NULL);
+    test_eq_str(str.data, result.data);
+
+    str.data = lexbor_free(str.data);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_delete_name_value_duplicates)
+{
+    lxb_status_t status;
+    lexbor_str_t str;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const lexbor_str_t init = lexbor_str("abc=xyz&first=last&abc=xyz&new=old");
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t value = lexbor_str("xyz");
+    static const lexbor_str_t result = lexbor_str("first=last&new=old");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    lxb_url_search_params_delete(sp, name.data, name.length,
+                                 value.data, value.length);
+
+    status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(str.data, NULL);
+    test_eq_str(str.data, result.data);
+
+    str.data = lexbor_free(str.data);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_get)
+{
+    lxb_status_t status;
+    lexbor_str_t *value;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const lexbor_str_t init = lexbor_str("first=last&abc=xyz&new=old&abc=123");
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t result = lexbor_str("xyz");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    value = lxb_url_search_params_get(sp, name.data, name.length);
+    test_ne(value, NULL);
+
+    test_eq_str(value->data, result.data);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_init_null_get)
+{
+    lxb_status_t status;
+    lexbor_str_t *value;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const lexbor_str_t name = lexbor_str("abc");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, NULL, 0);
+    test_ne(sp, NULL);
+
+    value = lxb_url_search_params_get(sp, name.data, name.length);
+    test_eq(value, NULL);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_has_only_name)
+{
+    bool have;
+    lxb_status_t status;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const lexbor_str_t init = lexbor_str("first=last&abc=xyz&new=old");
+    static const lexbor_str_t name = lexbor_str("abc");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    have = lxb_url_search_params_has(sp, name.data, name.length, NULL, 0);
+    test_eq(have, true);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_has_name_value)
+{
+    bool have;
+    lxb_status_t status;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const lexbor_str_t init = lexbor_str("abc=123&first=last&abc=xyz&new=old");
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t value = lexbor_str("xyz");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    have = lxb_url_search_params_has(sp, name.data, name.length,
+                                     value.data, value.length);
+    test_eq(have, true);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_has_name_value_ne)
+{
+    bool have;
+    lxb_status_t status;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const lexbor_str_t init = lexbor_str("abc=123&first=last&abc=890&new=old");
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t value = lexbor_str("xyz");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    have = lxb_url_search_params_has(sp, name.data, name.length,
+                                     value.data, value.length);
+    test_eq(have, false);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_null_init_has_only_name)
+{
+    bool have;
+    lxb_status_t status;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    static const lexbor_str_t name = lexbor_str("abc");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, NULL, 0);
+    test_ne(sp, NULL);
+
+    have = lxb_url_search_params_has(sp, name.data, name.length, NULL, 0);
+    test_eq(have, false);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_set)
+{
+    lxb_status_t status;
+    lexbor_mraw_t *mraw;
+    lexbor_str_t str;
+    lxb_url_search_params_t *sp;
+    lxb_url_search_entry_t *entry;
+
+    static const lexbor_str_t init = lexbor_str("abc=123&first=last&abc=890&new=old&abc=all");
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t value = lexbor_str("xyz");
+    static const lexbor_str_t result = lexbor_str("abc=xyz&first=last&new=old");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    test_eq(sp->length, 5);
+
+    entry = lxb_url_search_params_set(sp, name.data, name.length,
+                                      value.data, value.length);
+    test_ne(entry, NULL);
+
+    test_eq(sp->length, 3);
+
+    status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(str.data, NULL);
+    test_eq_str(str.data, result.data);
+
+    str.data = lexbor_free(str.data);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_set_without)
+{
+    lxb_status_t status;
+    lexbor_mraw_t *mraw;
+    lexbor_str_t str;
+    lxb_url_search_params_t *sp;
+    lxb_url_search_entry_t *entry;
+
+    static const lexbor_str_t init = lexbor_str("first=last&new=old");
+    static const lexbor_str_t name = lexbor_str("abc");
+    static const lexbor_str_t value = lexbor_str("xyz");
+    static const lexbor_str_t result = lexbor_str("first=last&new=old&abc=xyz");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init.data, init.length);
+    test_ne(sp, NULL);
+
+    test_eq(sp->length, 2);
+
+    entry = lxb_url_search_params_set(sp, name.data, name.length,
+                                      value.data, value.length);
+    test_ne(entry, NULL);
+
+    test_eq(sp->length, 3);
+
+    status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(str.data, NULL);
+    test_eq_str(str.data, result.data);
+
+    str.data = lexbor_free(str.data);
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN_ARGS(params_set_memory_error_input, const lexbor_str_t *init,
+                const lexbor_str_t *name, const lexbor_str_t *value)
+{
+    lxb_status_t status;
+    lexbor_mraw_t *mraw;
+    lexbor_str_t str;
+    lxb_url_search_params_t *sp;
+    lxb_url_search_entry_t *entry;
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, init->data, init->length);
+    test_ne(sp, NULL);
+
+    status = lexbor_memory_setup(test_malloc, realloc, calloc, free);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_malloc_fail = true;
+
+    entry = lxb_url_search_params_set(sp, name->data, name->length,
+                                      value->data, value->length);
+
+    test_malloc_fail = false;
+
+    (void) lexbor_memory_setup(malloc, realloc, calloc, free);
+
+    test_eq(entry, NULL);
+    test_eq(sp->length, 2);
+
+    status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_ne(str.data, NULL);
+    test_eq_str_n(str.data, str.length, init->data, init->length);
+
+    str.data = lexbor_free(str.data);
+
+    lxb_url_search_params_destroy(sp);
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN(params_set_memory_error)
+{
+    lxb_char_t *data;
+    lexbor_str_t init, name, value;
+
+    static const size_t length = 16384;
+    static const lexbor_str_t short_init = lexbor_str("abc=123&new=old");
+    static const lexbor_str_t short_name = lexbor_str("abc");
+    static const lexbor_str_t short_value = lexbor_str("xyz");
+    static const lexbor_str_t tail = lexbor_str("=123&new=old");
+
+    data = lexbor_malloc(length + tail.length);
+    test_ne(data, NULL);
+
+    memset(data, 'x', length);
+    memcpy(&data[length], tail.data, tail.length);
+
+    value.data = data;
+    value.length = length;
+
+    TEST_CALL_ARGS(params_set_memory_error_input, &short_init, &short_name,
+                   &value);
+
+    init.data = data;
+    init.length = length + tail.length;
+
+    name.data = data;
+    name.length = length;
+
+    TEST_CALL_ARGS(params_set_memory_error_input, &init, &name, &short_value);
+
+    lexbor_free(data);
+}
+TEST_END
+
+TEST_BEGIN_ARGS(params_init_memory_error_input, const lexbor_str_t *head,
+                const lexbor_str_t *tail, lxb_char_t filler,
+                size_t long_length)
+{
+    size_t count, length;
+    lxb_char_t *data;
+    lxb_status_t status;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+
+    length = head->length + long_length + tail->length;
+
+    data = lexbor_malloc(length);
+    test_ne(data, NULL);
+
+    memcpy(data, head->data, head->length);
+    memset(&data[head->length], filler, long_length);
+    memcpy(&data[head->length + long_length], tail->data, tail->length);
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    count = lexbor_mraw_reference_count(mraw);
+
+    status = lexbor_memory_setup(test_malloc, realloc, calloc, free);
+    test_eq(status, LXB_STATUS_OK);
+
+    test_malloc_fail = true;
+
+    sp = lxb_url_search_params_init(mraw, data, length);
+
+    test_malloc_fail = false;
+
+    (void) lexbor_memory_setup(malloc, realloc, calloc, free);
+
+    test_eq(sp, NULL);
+    test_eq_size(lexbor_mraw_reference_count(mraw), count);
+
+    lexbor_mraw_destroy(mraw, true);
+    lexbor_free(data);
+}
+TEST_END
+
+TEST_BEGIN(params_init_memory_error)
+{
+    static const lexbor_str_t head = lexbor_str("abc=123&xyz&");
+    static const lexbor_str_t head_value = lexbor_str("abc=123&xyz&k=");
+    static const lexbor_str_t tail = lexbor_str("&new=old");
+    static const lexbor_str_t empty = lexbor_str("");
+
+    TEST_CALL_ARGS(params_init_memory_error_input, &head, &empty, 'x', 16384);
+    TEST_CALL_ARGS(params_init_memory_error_input, &head, &tail, 'x', 16384);
+    TEST_CALL_ARGS(params_init_memory_error_input, &head_value, &tail,
+                   'x', 16384);
+    TEST_CALL_ARGS(params_init_memory_error_input, &head, &tail, 0xFF, 2000);
+    TEST_CALL_ARGS(params_init_memory_error_input, &head_value, &empty,
+                   0xFF, 2000);
+}
+TEST_END
+
+TEST_BEGIN(params_sort_append)
+{
+    lxb_status_t status;
+    lexbor_mraw_t *mraw;
+    lexbor_str_t str;
+    lxb_url_search_params_t *sp;
+    lxb_url_search_entry_t *entry;
+
+    static const lexbor_str_t inits[] = {
+        lexbor_str("b&d&c&a"),
+        lexbor_str("d&c&b&a"),
+        lexbor_str("d&a&c&b"),
+        lexbor_str("a&b&c&d")
+    };
+
+    static const lexbor_str_t name = lexbor_str("e");
+    static const lexbor_str_t value = lexbor_str("5");
+    static const lexbor_str_t result = lexbor_str("a=&b=&c=&d=&e=5");
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    for (size_t i = 0; i < sizeof(inits) / sizeof(lexbor_str_t); i++) {
+        sp = lxb_url_search_params_init(mraw, inits[i].data, inits[i].length);
+        test_ne(sp, NULL);
+
+        lxb_url_search_params_sort(sp);
+
+        entry = lxb_url_search_params_append(sp, name.data, name.length,
+                                             value.data, value.length);
+        test_ne(entry, NULL);
+
+        test_eq(sp->last, entry);
+        test_eq(sp->length, 5);
+
+        status = lxb_url_search_params_serialize(sp, serialize_cb, &str);
+        test_eq(status, LXB_STATUS_OK);
+
+        test_ne(str.data, NULL);
+        test_eq_str(str.data, result.data);
+
+        str.data = lexbor_free(str.data);
+
+        lxb_url_search_params_destroy(sp);
+    }
+
+    lexbor_mraw_destroy(mraw, true);
+}
+TEST_END
+
+TEST_BEGIN_ARGS(params_sort_many_input, size_t amount)
+{
+    int cmp;
+    size_t i, k, length, count, value, prev_value;
+    uint32_t seed;
+    lxb_char_t *query, *p;
+    lxb_status_t status;
+    lexbor_mraw_t *mraw;
+    lxb_url_search_params_t *sp;
+    lxb_url_search_entry_t *entry, *prev;
+
+    query = lexbor_malloc(amount * 16);
+    test_ne(query, NULL);
+
+    p = query;
+    seed = 1;
+
+    for (i = 0; i < amount; i++) {
+        seed = seed * 1103515245 + 12345;
+        length = (seed >> 16) % 3 + 1;
+
+        for (k = 0; k < length; k++) {
+            seed = seed * 1103515245 + 12345;
+            *p++ = (lxb_char_t) ('a' + (seed >> 16) % 3);
+        }
+
+        p += snprintf((char *) p, 12, "=" LEXBOR_FORMAT_Z "&", i);
+    }
+
+    mraw = lexbor_mraw_create();
+    status = lexbor_mraw_init(mraw, 4096);
+    test_eq(status, LXB_STATUS_OK);
+
+    sp = lxb_url_search_params_init(mraw, query, p - query);
+    test_ne(sp, NULL);
+
+    lxb_url_search_params_sort(sp);
+
+    prev = NULL;
+    prev_value = 0;
+    count = 0;
+
+    for (entry = sp->first; entry != NULL; entry = entry->next) {
+        test_eq(entry->prev, prev);
+
+        value = strtoul((const char *) entry->value.data, NULL, 10);
+
+        if (prev != NULL) {
+            length = lexbor_min(prev->name.length, entry->name.length);
+            cmp = memcmp(prev->name.data, entry->name.data, length);
+
+            if (cmp == 0) {
+                test_eq(prev->name.length > entry->name.length, false);
+
+                if (prev->name.length == entry->name.length) {
+                    test_eq(prev_value < value, true);
+                }
+            }
+            else {
+                test_eq(cmp < 0, true);
+            }
+        }
+
+        prev = entry;
+        prev_value = value;
+        count += 1;
+    }
+
+    test_eq(sp->last, prev);
+    test_eq_size(count, amount);
+    test_eq_size(sp->length, amount);
+
+    lxb_url_search_params_destroy(sp);
+    lexbor_mraw_destroy(mraw, true);
+    lexbor_free(query);
+}
+TEST_END
+
+TEST_BEGIN(params_sort_many)
+{
+    static const size_t amounts[] = {
+        1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 31, 32, 33, 100, 1000, 4097, 300000
+    };
+
+    for (size_t i = 0; i < sizeof(amounts) / sizeof(size_t); i++) {
+        TEST_CALL_ARGS(params_sort_many_input, amounts[i]);
+    }
+}
+TEST_END
+
+int
+main(int argc, const char * argv[])
+{
+    TEST_INIT();
+
+    TEST_ADD(params_init);
+    TEST_ADD(params_init_replacement);
+    TEST_ADD(params_append);
+    TEST_ADD(params_append_after_name);
+    TEST_ADD(params_null_init_append);
+    TEST_ADD(params_delete_name_value);
+    TEST_ADD(params_delete_name);
+    TEST_ADD(params_delete_name_duplicates);
+    TEST_ADD(params_delete_name_value_duplicates);
+    TEST_ADD(params_get);
+    TEST_ADD(params_init_null_get);
+    TEST_ADD(params_has_only_name);
+    TEST_ADD(params_has_name_value);
+    TEST_ADD(params_has_name_value_ne);
+    TEST_ADD(params_null_init_has_only_name);
+    TEST_ADD(params_set);
+    TEST_ADD(params_set_without);
+    TEST_ADD(params_set_memory_error);
+    TEST_ADD(params_init_memory_error);
+    TEST_ADD(params_sort_append);
+    TEST_ADD(params_sort_many);
+
+    TEST_RUN("lexbor/url/search_params");
+    TEST_RELEASE();
+}
